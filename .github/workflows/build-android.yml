@@ -27,10 +27,12 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Check Gemini backend source
-        run: node --check backend/server.js
+      - name: Check Gemini backend sources
+        run: |
+          node --check backend/server.js
+          node --check cloudflare-worker/src/index.js
 
-      - name: Rebuild Maalish base and apply V5 patches
+      - name: Rebuild Maalish base and apply V6 patches
         run: |
           cat build_src_v2_small/part_*.b64 | base64 -d > maalish_source_v2.zip
           rm -rf unpacked app
@@ -43,7 +45,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           p = Path('app/pubspec.yaml')
-          s = p.read_text().replace('version: 0.2.0+2','version: 0.5.0+5')
+          s = p.read_text().replace('version: 0.2.0+2','version: 0.6.0+6')
           if 'firebase_core:' not in s:
               s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.0.0\n  firebase_auth: ^7.0.0\n  google_sign_in: ^7.2.0')
           p.write_text(s)
@@ -86,11 +88,11 @@ jobs:
           --dart-define=MAALISH_API_URL=${{ secrets.MAALISH_API_URL }}
 
       - name: Collect APK
-        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v5-release.apk
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v6-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maalish-v5-APK
-          path: Maalish-v5-release.apk
+          name: Maalish-v6-APK
+          path: Maalish-v6-release.apk
           if-no-files-found: error
