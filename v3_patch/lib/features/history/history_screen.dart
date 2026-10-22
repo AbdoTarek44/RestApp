@@ -29,7 +29,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       ...sessions.map((i) => Container(margin: const EdgeInsets.only(bottom: 12), padding: const EdgeInsets.all(18), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(22)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [Expanded(child: Text(i.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.navy))), Text('${i.createdAt.day}/${i.createdAt.month}/${i.createdAt.year}', style: const TextStyle(color: AppColors.text2))]),
         const SizedBox(height: 8), Text(i.preview, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.text2)), const SizedBox(height: 10),
-        Wrap(spacing: 7, runSpacing: 7, children: [...i.categories.take(3).map((c) => Chip(label: Text(ProblemAnalyzer.arabicLabel(c)), side: BorderSide.none, backgroundColor: AppColors.softBlue)), if (i.afterMood.isNotEmpty) Chip(label: Text(i.afterMood), side: BorderSide.none, backgroundColor: AppColors.softGreen)]),
+        Wrap(spacing: 7, runSpacing: 7, children: [...i.categories.take(3).map((c) => Chip(label: Text(ProblemAnalyzer.arabicLabel(c)), side: BorderSide.none, backgroundColor: AppColors.softBlue)), if (i.afterMood.isNotEmpty) Chip(label: Text(i.afterMood), side: BorderSide.none, backgroundColor: AppColors.green.withValues(alpha: .20))]),
       ]))),
     ])));
   }
