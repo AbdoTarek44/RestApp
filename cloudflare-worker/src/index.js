@@ -1,0 +1,180 @@
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+const REPLY_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    text: { type: 'STRING' },
+    expression: { type: 'STRING', enum: ['listening','comforting','thinking','laughing','worried','neutral','shocked'] },
+    showIntentChoices: { type: 'BOOLEAN' },
+    safetyMode: { type: 'BOOLEAN' },
+    emotion: { type: 'STRING' },
+    intensity: { type: 'INTEGER' },
+    categories: { type: 'ARRAY', items: { type: 'STRING' } },
+    need: { type: 'STRING', enum: ['listen','comfort','perspective','advice','thinking','humor','clarify','safety'] },
+    stage: { type: 'STRING', enum: ['opening','listening','understanding','reflecting','clarifying','supporting','decision','closing','safety'] },
+    memoryCandidates: { type: 'ARRAY', items: { type: 'STRING' } },
+    sessionTitle: { type: 'STRING' }
+  },
+  required: ['text','expression','showIntentChoices','safetyMode','emotion','intensity','categories','need','stage','memoryCandidates','sessionTitle']
+};
+
+const SYSTEM_PROMPT = `
+أنت "معلش"، رفيق فضفضة مصري ذكي ودافئ وخفيف من غير ما تبقى طبيب أو معالج نفسي.
+هدفك الأساسي: تخلي المستخدم يحس إنه مسموع ومفهوم، وبعدها تساعده حسب احتياجه.
+- اتكلم بالمصري الطبيعي، قصير وواضح. غالبًا 1-3 جمل فقط.
+- اسأل سؤال واحد في المرة.
+- ما تديش نصايح بسرعة. افهم الأول، اعكس الإحساس، وبعدها ساعد.
+- ما توافقش المستخدم بشكل أعمى وما تشتمش أو تحرض ضد الطرف الآخر.
+- لو المستخدم عايز اسمعني بس، ما تديش حلول.
+- لو عايز رأي أو تفكير، ساعده يفصل المشكلة ويفهم الاختيارات من غير ما تاخد القرار مكانه.
+- الهزار مسموح فقط لو الحالة مناسبة أو المستخدم طلبه، وممنوع في الفقد، العنف، الإساءة، إيذاء النفس، الخطر المباشر أو الانهيار الشديد.
+- ما تشخصش أمراض نفسية أو طبية، وما تقدمش نفسك كطبيب.
+- لو فيه خطر مباشر، عنف، إساءة، إيذاء نفس، تهديد للآخرين أو حالة حساسة جدًا: safetyMode=true، أوقف الهزار، ركز على الأمان الفوري وشجع التواصل مع شخص موثوق وخدمات الطوارئ المحلية عند الخطر المباشر.
+- expression لازم يعبر عن الرد بصريًا.
+- showIntentChoices=true فقط لما يكون طبيعي تسأل المستخدم: اسمعني بس / قولّي رأيك / ساعدني أفكر / خلينا نهزر عليها.
+- memoryCandidates: معلومات ثابتة ومفيدة مستقبلًا فقط، وبحد أقصى 3 عناصر قصيرة.
+- sessionTitle: عنوان عربي قصير جدًا للجلسة، من 2-5 كلمات.
+- categories استخدم أسماء إنجليزية قصيرة مثل: marriage, family, relatives, parenting, relationship, friends, work, money, study, grief, loneliness, self_confidence, future, decision, health_concern, daily_life, other.
+- intensity رقم من 1 إلى 10 حسب ثقل الحالة العاطفي، مش تشخيص طبي.
+- الرد الأخير ممكن ينتهي بـ"معلش" فقط لما تكون لحظة مناسبة، مش في كل رسالة.
+`;
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'access-control-allow-origin': '*',
+      'access-control-allow-headers': 'content-type',
+      'access-control-allow-methods': 'GET,POST,OPTIONS'
+    }
+  });
+}
+
+function normalizeMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages
+    .filter(m => m && typeof m.content === 'string' && ['user', 'assistant'].includes(m.role))
+    .slice(-20)
+    .map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content.slice(0, 5000) }]
+    }));
+}
+
+function acuteSafetySignal(text) {
+  const value = String(text || '').toLowerCase();
+  const patterns = [
+    /انتحار|انتحر|اقتل نفسي|أقتل نفسي|اموت نفسي|أموت نفسي|مش عايز أعيش|مش عايزة أعيش/,
+    /هقتله|هقتلها|هأقتله|هأقتلها|اقتل حد|أقتل حد/,
+    /ضربني|بيضربني|بيهددني|هددني|عنف|اغتصاب|اعتداء|تحرش بطفل|طفل.*اعتداء/,
+    /suicide|kill myself|hurt myself|kill him|kill her|domestic violence|rape|child abuse/
+  ];
+  return patterns.some(p => p.test(value));
+}
+
+async function geminiGenerate(env, contents, systemInstruction, acute) {
+  const model = env.MAALISH_MODEL || 'gemini-3.1-flash-lite';
+  const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-goog-api-key': env.GEMINI_API_KEY
+    },
+    body: JSON.stringify({
+      system_instruction: {
+        parts: [{
+          text: `${systemInstruction}\nSafety signal from server: acute=${acute}. If acute=true you MUST set safetyMode=true and use need=safety, stage=safety.`
+        }]
+      },
+      contents,
+      generationConfig: {
+        temperature: 0.65,
+        maxOutputTokens: 700,
+        response_mime_type: 'application/json',
+        response_schema: REPLY_SCHEMA
+      }
+    })
+  });
+
+  const raw = await response.text();
+  let data;
+  try { data = JSON.parse(raw); } catch { data = { raw }; }
+  if (!response.ok) throw new Error(`Gemini ${response.status}: ${raw.slice(0, 500)}`);
+  return data;
+}
+
+function geminiText(response) {
+  return response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+export default {
+  async fetch(request, env) {
+    if (request.method === 'OPTIONS') return json({ ok: true });
+
+    const url = new URL(request.url);
+
+    if (url.pathname === '/health' && request.method === 'GET') {
+      return json({
+        ok: true,
+        service: 'maalish-ai',
+        provider: 'gemini',
+        model: env.MAALISH_MODEL || 'gemini-3.1-flash-lite',
+        keyConfigured: Boolean(env.GEMINI_API_KEY)
+      });
+    }
+
+    if (url.pathname !== '/chat' || request.method !== 'POST') {
+      return json({ error: 'Not found' }, 404);
+    }
+
+    if (!env.GEMINI_API_KEY) {
+      return json({ error: 'GEMINI_API_KEY is not configured.' }, 503);
+    }
+
+    let body;
+    try { body = await request.json(); } catch { return json({ error: 'Invalid JSON.' }, 400); }
+
+    const contents = normalizeMessages(body?.messages);
+    if (!contents.length) return json({ error: 'messages is required.' }, 400);
+
+    const profile = body?.profile && typeof body.profile === 'object' ? body.profile : {};
+    const latest = [...contents].reverse().find(m => m.role === 'user')?.parts?.[0]?.text || '';
+    const acute = acuteSafetySignal(latest);
+
+    const profileContext = {
+      nickname: String(profile.nickname || '').slice(0, 80),
+      style: String(profile.style || 'متوازن').slice(0, 40),
+      humor: profile.humor !== false,
+      adviceOnlyWhenAsked: profile.adviceOnlyWhenAsked !== false,
+      memories: Array.isArray(profile.memories)
+        ? profile.memories.slice(-20).map(v => String(v).slice(0, 250))
+        : []
+    };
+
+    try {
+      const response = await geminiGenerate(
+        env,
+        contents,
+        `${SYSTEM_PROMPT}\nتفضيلات المستخدم: ${JSON.stringify(profileContext)}`,
+        acute
+      );
+      const parsed = JSON.parse(geminiText(response));
+      parsed.intensity = Math.max(1, Math.min(10, Number(parsed.intensity || 5)));
+      if (!Array.isArray(parsed.categories)) parsed.categories = ['other'];
+      if (!Array.isArray(parsed.memoryCandidates)) parsed.memoryCandidates = [];
+      parsed.categories = parsed.categories.slice(0, 6);
+      parsed.memoryCandidates = parsed.memoryCandidates.slice(0, 3);
+      if (acute) {
+        parsed.safetyMode = true;
+        parsed.need = 'safety';
+        parsed.stage = 'safety';
+        parsed.expression = 'worried';
+      }
+      return json(parsed);
+    } catch (error) {
+      return json({ error: 'AI service temporarily unavailable.' }, 502);
+    }
+  }
+};
