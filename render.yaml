@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: maalish-ai-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MAALISH_MODEL
+        value: gpt-6-luna
