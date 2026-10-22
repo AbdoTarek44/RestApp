@@ -5,9 +5,9 @@ import { rateLimit } from 'express-rate-limit';
 
 const app = express();
 const PORT = Number(process.env.PORT || 8080);
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const MODEL = process.env.MAALISH_MODEL || 'gpt-6-luna';
-const OPENAI_BASE = 'https://api.openai.com/v1';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const MODEL = process.env.MAALISH_MODEL || 'gemini-3.1-flash-lite';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 app.use(helmet());
 app.use(cors({ origin: true }));
@@ -15,20 +15,19 @@ app.use(express.json({ limit: '256kb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false }));
 
 const REPLY_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
+  type: 'OBJECT',
   properties: {
-    text: { type: 'string' },
-    expression: { type: 'string', enum: ['listening','comforting','thinking','laughing','worried','neutral','shocked'] },
-    showIntentChoices: { type: 'boolean' },
-    safetyMode: { type: 'boolean' },
-    emotion: { type: 'string' },
-    intensity: { type: 'integer', minimum: 1, maximum: 10 },
-    categories: { type: 'array', items: { type: 'string' }, maxItems: 6 },
-    need: { type: 'string', enum: ['listen','comfort','perspective','advice','thinking','humor','clarify','safety'] },
-    stage: { type: 'string', enum: ['opening','listening','understanding','reflecting','clarifying','supporting','decision','closing','safety'] },
-    memoryCandidates: { type: 'array', items: { type: 'string' }, maxItems: 3 },
-    sessionTitle: { type: 'string' }
+    text: { type: 'STRING' },
+    expression: { type: 'STRING', enum: ['listening','comforting','thinking','laughing','worried','neutral','shocked'] },
+    showIntentChoices: { type: 'BOOLEAN' },
+    safetyMode: { type: 'BOOLEAN' },
+    emotion: { type: 'STRING' },
+    intensity: { type: 'INTEGER' },
+    categories: { type: 'ARRAY', items: { type: 'STRING' } },
+    need: { type: 'STRING', enum: ['listen','comfort','perspective','advice','thinking','humor','clarify','safety'] },
+    stage: { type: 'STRING', enum: ['opening','listening','understanding','reflecting','clarifying','supporting','decision','closing','safety'] },
+    memoryCandidates: { type: 'ARRAY', items: { type: 'STRING' } },
+    sessionTitle: { type: 'STRING' }
   },
   required: ['text','expression','showIntentChoices','safetyMode','emotion','intensity','categories','need','stage','memoryCandidates','sessionTitle']
 };
@@ -62,67 +61,78 @@ function normalizeMessages(messages) {
   return messages
     .filter(m => m && typeof m.content === 'string' && ['user','assistant'].includes(m.role))
     .slice(-20)
-    .map(m => ({ role: m.role, content: m.content.slice(0, 5000) }));
+    .map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content.slice(0, 5000) }]
+    }));
 }
 
-async function openaiPost(path, body) {
-  const res = await fetch(`${OPENAI_BASE}${path}`, {
+function acuteSafetySignal(text) {
+  const value = String(text || '').toLowerCase();
+  const patterns = [
+    /انتحار|انتحر|اقتل نفسي|أقتل نفسي|اموت نفسي|أموت نفسي|مش عايز أعيش|مش عايزة أعيش/,
+    /هقتله|هقتلها|هأقتله|هأقتلها|اقتل حد|أقتل حد/,
+    /ضربني|بيضربني|بيهددني|هددني|عنف|اغتصاب|اعتداء|تحرش بطفل|طفل.*اعتداء/,
+    /suicide|kill myself|hurt myself|kill him|kill her|domestic violence|rape|child abuse/
+  ];
+  return patterns.some(p => p.test(value));
+}
+
+async function geminiGenerate(contents, systemInstruction, acute) {
+  const url = `${GEMINI_BASE}/models/${encodeURIComponent(MODEL)}:generateContent`;
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'x-goog-api-key': GEMINI_API_KEY
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: `${systemInstruction}\nSafety signal from server: acute=${acute}. If acute=true you MUST set safetyMode=true and use need=safety, stage=safety.` }] },
+      contents,
+      generationConfig: {
+        temperature: 0.65,
+        maxOutputTokens: 700,
+        response_mime_type: 'application/json',
+        response_schema: REPLY_SCHEMA
+      }
+    })
   });
-  const text = await res.text();
+
+  const raw = await response.text();
   let data;
-  try { data = JSON.parse(text); } catch { data = { raw: text }; }
-  if (!res.ok) {
-    const err = new Error(`OpenAI ${res.status}`);
-    err.status = res.status;
-    err.data = data;
-    throw err;
+  try { data = JSON.parse(raw); } catch { data = { raw }; }
+  if (!response.ok) {
+    const error = new Error(`Gemini ${response.status}`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
   }
   return data;
 }
 
-function outputText(response) {
-  for (const item of response?.output || []) {
-    for (const part of item?.content || []) {
-      if (part?.type === 'output_text' && typeof part.text === 'string') return part.text;
-    }
-  }
-  return '';
-}
-
-async function moderate(latest) {
-  try {
-    const data = await openaiPost('/moderations', { model: 'omni-moderation-latest', input: latest });
-    const r = data?.results?.[0] || {};
-    const c = r.categories || {};
-    const acute = Boolean(
-      c['self-harm'] || c['self-harm/intent'] || c['self-harm/instructions'] ||
-      c['violence'] || c['violence/graphic'] || c['harassment/threatening'] || c['sexual/minors']
-    );
-    return { flagged: Boolean(r.flagged), acute };
-  } catch {
-    return { flagged: false, acute: false };
-  }
+function geminiText(response) {
+  return response?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
 app.get('/health', (_req, res) => {
-  res.json({ ok: true, service: 'maalish-ai', model: MODEL, keyConfigured: Boolean(OPENAI_API_KEY) });
+  res.json({
+    ok: true,
+    service: 'maalish-ai',
+    provider: 'gemini',
+    model: MODEL,
+    keyConfigured: Boolean(GEMINI_API_KEY)
+  });
 });
 
 app.post('/chat', async (req, res) => {
-  if (!OPENAI_API_KEY) return res.status(503).json({ error: 'OPENAI_API_KEY is not configured.' });
+  if (!GEMINI_API_KEY) return res.status(503).json({ error: 'GEMINI_API_KEY is not configured.' });
 
-  const messages = normalizeMessages(req.body?.messages);
-  if (!messages.length) return res.status(400).json({ error: 'messages is required.' });
+  const contents = normalizeMessages(req.body?.messages);
+  if (!contents.length) return res.status(400).json({ error: 'messages is required.' });
 
   const profile = req.body?.profile && typeof req.body.profile === 'object' ? req.body.profile : {};
-  const latest = [...messages].reverse().find(m => m.role === 'user')?.content || '';
-  const moderation = await moderate(latest);
+  const latest = [...contents].reverse().find(m => m.role === 'user')?.parts?.[0]?.text || '';
+  const acute = acuteSafetySignal(latest);
 
   const profileContext = {
     nickname: String(profile.nickname || '').slice(0, 80),
@@ -132,27 +142,23 @@ app.post('/chat', async (req, res) => {
     memories: Array.isArray(profile.memories) ? profile.memories.slice(-20).map(v => String(v).slice(0, 250)) : []
   };
 
-  const developerContext = `\nتفضيلات المستخدم: ${JSON.stringify(profileContext)}\nModeration signal: flagged=${moderation.flagged}, acute=${moderation.acute}. لو acute=true تعامل معها كحالة Safety حتى لو السياق فيه هزار.`;
+  const context = `${SYSTEM_PROMPT}\nتفضيلات المستخدم: ${JSON.stringify(profileContext)}`;
 
   try {
-    const response = await openaiPost('/responses', {
-      model: MODEL,
-      instructions: SYSTEM_PROMPT + developerContext,
-      input: messages,
-      max_output_tokens: 700,
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'maalish_reply',
-          strict: true,
-          schema: REPLY_SCHEMA
-        }
-      }
-    });
-
-    const raw = outputText(response);
-    const parsed = JSON.parse(raw);
-    if (moderation.acute) parsed.safetyMode = true;
+    const response = await geminiGenerate(contents, context, acute);
+    const text = geminiText(response);
+    const parsed = JSON.parse(text);
+    parsed.intensity = Math.max(1, Math.min(10, Number(parsed.intensity || 5)));
+    if (acute) {
+      parsed.safetyMode = true;
+      parsed.need = 'safety';
+      parsed.stage = 'safety';
+      parsed.expression = 'worried';
+    }
+    if (!Array.isArray(parsed.categories)) parsed.categories = ['other'];
+    if (!Array.isArray(parsed.memoryCandidates)) parsed.memoryCandidates = [];
+    parsed.categories = parsed.categories.slice(0, 6);
+    parsed.memoryCandidates = parsed.memoryCandidates.slice(0, 3);
     res.json(parsed);
   } catch (error) {
     console.error('chat_error', error?.status || '', error?.data || error?.message || error);
@@ -163,5 +169,5 @@ app.post('/chat', async (req, res) => {
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Maalish AI backend listening on ${PORT}`);
+  console.log(`Maalish Gemini backend listening on ${PORT} with ${MODEL}`);
 });
