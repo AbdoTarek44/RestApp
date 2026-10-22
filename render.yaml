@@ -7,7 +7,7 @@ services:
     startCommand: npm start
     healthCheckPath: /health
     envVars:
-      - key: OPENAI_API_KEY
+      - key: GEMINI_API_KEY
         sync: false
       - key: MAALISH_MODEL
-        value: gpt-6-luna
+        value: gemini-3.1-flash-lite
