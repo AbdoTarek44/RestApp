@@ -27,14 +27,20 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Rebuild Maalish v2 source archive
+      - name: Rebuild Maalish base and apply V3 patches
         run: |
           cat build_src_v2_small/part_*.b64 | base64 -d > maalish_source_v2.zip
           rm -rf unpacked app
           mkdir -p unpacked
           unzip -o maalish_source_v2.zip -d unpacked || true
           cp -R unpacked/maalish_app app
-          cp patches_v2/chat_screen.dart app/lib/features/chat/chat_screen.dart
+          cp -R v3_patch/lib/* app/lib/
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app/pubspec.yaml')
+          s = p.read_text().replace('version: 0.2.0+2','version: 0.3.0+3')
+          p.write_text(s)
+          PY
 
       - name: Generate Android platform files
         working-directory: app
@@ -61,11 +67,11 @@ jobs:
         run: flutter build apk --release
 
       - name: Collect APK
-        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v2-release.apk
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v3-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maalish-v2-APK
-          path: Maalish-v2-release.apk
+          name: Maalish-v3-APK
+          path: Maalish-v3-release.apk
           if-no-files-found: error
