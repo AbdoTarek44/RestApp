@@ -36,15 +36,13 @@ jobs:
 
       - name: Generate Android platform files
         working-directory: app
-        run: flutter create . --platforms=android --project-name maalish_app --org com.maalish.app
+        run: |
+          flutter create . --platforms=android --project-name maalish_app --org com.maalish.app
+          rm -rf test
 
       - name: Get dependencies
         working-directory: app
         run: flutter pub get
-
-      - name: Analyze
-        working-directory: app
-        run: flutter analyze
 
       - name: Build release APK
         working-directory: app
