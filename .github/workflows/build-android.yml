@@ -29,7 +29,7 @@ jobs:
 
       - name: Rebuild Maalish v2 source archive
         run: |
-          cat build_src_v2/part_*.b64 | base64 -d > maalish_source_v2.zip
+          cat build_src_v2_small/part_*.b64 | base64 -d > maalish_source_v2.zip
           unzip -t maalish_source_v2.zip
           rm -rf unpacked app
           mkdir -p unpacked
