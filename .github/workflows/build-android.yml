@@ -27,18 +27,30 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Rebuild Maalish source archive
+      - name: Rebuild Maalish v2 source archive
         run: |
-          cat build_src/part_*.b64 | base64 -d > maalish_source.zip
-          unzip -t maalish_source.zip
-          mkdir -p app
-          unzip -o maalish_source.zip -d app
+          cat build_src_v2/part_*.b64 | base64 -d > maalish_source_v2.zip
+          unzip -t maalish_source_v2.zip
+          rm -rf unpacked app
+          mkdir -p unpacked
+          unzip -o maalish_source_v2.zip -d unpacked
+          cp -R unpacked/maalish_app app
 
       - name: Generate Android platform files
         working-directory: app
         run: |
           flutter create . --platforms=android --project-name maalish_app --org com.maalish.app
           rm -rf test
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          perms = marker + '\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />'
+          if 'android.permission.RECORD_AUDIO' not in s:
+              s = s.replace(marker, perms)
+          p.write_text(s)
+          PY
 
       - name: Get dependencies
         working-directory: app
@@ -49,11 +61,11 @@ jobs:
         run: flutter build apk --release
 
       - name: Collect APK
-        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-release.apk
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v2-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maalish-APK
-          path: Maalish-release.apk
+          name: Maalish-v2-APK
+          path: Maalish-v2-release.apk
           if-no-files-found: error
