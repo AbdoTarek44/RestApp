@@ -51,13 +51,16 @@ class AiService {
         return value.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList();
       }
 
+      final rawIntensity = data['intensity'];
+      final intensity = rawIntensity is num ? rawIntensity.round().clamp(1, 10).toInt() : 5;
+
       return MaalishReply(
         text: (data['text'] ?? 'أنا سامعك. كمل.').toString(),
         expression: (data['expression'] ?? 'listening').toString(),
         showIntentChoices: data['showIntentChoices'] == true,
         safetyMode: data['safetyMode'] == true,
         emotion: (data['emotion'] ?? '').toString(),
-        intensity: data['intensity'] is num ? (data['intensity'] as num).round().clamp(1, 10) : 5,
+        intensity: intensity,
         categories: asStrings(data['categories']),
         need: (data['need'] ?? 'listen').toString(),
         stage: (data['stage'] ?? 'listening').toString(),
