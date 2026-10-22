@@ -1,0 +1,59 @@
+name: Build Maalish Android APK
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Extract Maalish project
+        run: |
+          mkdir -p app
+          unzip -o maalish_flutter_mvp.zip -d app
+
+      - name: Generate Android platform files
+        working-directory: app
+        run: flutter create . --platforms=android --project-name maalish_app --org com.maalish.app
+
+      - name: Get dependencies
+        working-directory: app
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: app
+        run: flutter analyze
+
+      - name: Build release APK
+        working-directory: app
+        run: flutter build apk --release
+
+      - name: Collect APK
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-release.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Maalish-APK
+          path: Maalish-release.apk
+          if-no-files-found: error
