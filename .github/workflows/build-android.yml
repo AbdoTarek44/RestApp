@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: maalish-android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,13 +37,13 @@ jobs:
           node --check backend/server.js
           node --check cloudflare-worker/src/index.js
 
-      - name: Rebuild Maalish base and apply V7 patches
+      - name: Rebuild Maalish base and apply V8 patches
         run: |
           python scripts/reconstruct.py
           python - <<'PY'
           from pathlib import Path
           p = Path('app/pubspec.yaml')
-          s = p.read_text().replace('version: 0.2.0+2','version: 0.7.0+7')
+          s = p.read_text().replace('version: 0.2.0+2','version: 0.8.0+8')
           if 'firebase_core:' not in s:
               s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.1.0\n  firebase_auth: ^7.0.1\n  google_sign_in: ^7.2.0\n  cloud_firestore: ^7.1.0')
           p.write_text(s)
@@ -73,26 +77,25 @@ jobs:
         working-directory: app
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Report APK signing certificate
-        run: |
-          mkdir -p ~/.android
-          if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -keypass android -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -validity 10000
-          fi
-          keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey
-
       - name: Build release APK
         working-directory: app
         run: >-
           flutter build apk --release
           --dart-define-from-file=../config/firebase.android.json
 
+      - name: Report actual APK signing certificate
+        run: |
+          apk_signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          "$apk_signer" verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk | tee Maalish-v8-signing.txt
+
       - name: Collect APK
-        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v7-release.apk
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v8-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maalish-v7-APK
-          path: Maalish-v7-release.apk
+          name: Maalish-v8-APK
+          path: |
+            Maalish-v8-release.apk
+            Maalish-v8-signing.txt
           if-no-files-found: error
