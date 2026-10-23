@@ -3,4 +3,10 @@ main = "src/index.js"
 compatibility_date = "2026-10-01"
 
 [vars]
+FIREBASE_PROJECT_ID = "maalish-8cd54"
 MAALISH_MODEL = "gemini-3.1-flash-lite"
+
+[[ratelimits]]
+name = "CHAT_RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 15, period = 60 }
