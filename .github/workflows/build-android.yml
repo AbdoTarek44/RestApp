@@ -54,20 +54,7 @@ jobs:
         run: |
           flutter create . --platforms=android --project-name maalish_app --org com.maalish.app
           rm -rf test
-          python - <<'PY'
-          from pathlib import Path
-          manifest = Path('android/app/src/main/AndroidManifest.xml')
-          s = manifest.read_text()
-          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          perms = marker + '\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />'
-          if 'android.permission.RECORD_AUDIO' not in s:
-              s = s.replace(marker, perms)
-          manifest.write_text(s)
-
-          gradle = Path('android/app/build.gradle.kts')
-          g = gradle.read_text().replace('minSdk = flutter.minSdkVersion', 'minSdk = 24')
-          gradle.write_text(g)
-          PY
+          python ../scripts/configure_preview.py
 
       - name: Get dependencies
         working-directory: app
@@ -77,11 +64,21 @@ jobs:
         working-directory: app
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
+      - name: Restore preview development signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.maalish-preview-signing/debug.keystore
+          key: maalish-preview-development-signing-v1
+
       - name: Build release APK
         working-directory: app
-        run: >-
-          flutter build apk --release
-          --dart-define-from-file=../config/firebase.android.json
+        run: |
+          mkdir -p "$HOME/.maalish-preview-signing"
+          export MAALISH_SIGNING_STORE="$HOME/.maalish-preview-signing/debug.keystore"
+          if [ ! -f "$MAALISH_SIGNING_STORE" ]; then
+            keytool -genkeypair -keystore "$MAALISH_SIGNING_STORE" -storepass android -keypass android -alias androiddebugkey -dname "CN=Maalish Preview Development,O=Maalish,C=EG" -keyalg RSA -validity 10000
+          fi
+          flutter build apk --release --dart-define-from-file=../config/firebase.preview.android.json
 
       - name: Report actual APK signing certificate
         run: |
@@ -89,13 +86,13 @@ jobs:
           "$apk_signer" verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk | tee Maalish-v8-signing.txt
 
       - name: Collect APK
-        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v8-release.apk
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v8-preview.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maalish-v8-APK
+          name: Maalish-v8-Preview-APK
           path: |
-            Maalish-v8-release.apk
+            Maalish-v8-preview.apk
             Maalish-v8-signing.txt
           if-no-files-found: error
