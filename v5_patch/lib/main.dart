@@ -45,6 +45,9 @@ class _StartupGateState extends State<StartupGate> {
     final prefs = await SharedPreferences.getInstance();
     final onboardingDone = prefs.getBool('onboarding_done') ?? false;
     final guest = prefs.getBool('guest_mode') ?? false;
+    if (onboardingDone && guest && AuthService.ready) {
+      try { await AuthService().ensureGuest().timeout(const Duration(seconds: 8)); } catch (_) {}
+    }
     if (!onboardingDone) {
       target = const OnboardingScreen();
     } else if (AuthService.ready && AuthService().currentUser != null) {
