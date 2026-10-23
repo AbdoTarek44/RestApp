@@ -1,0 +1,92 @@
+{
+  "project_info": {
+    "project_number": "705284519438",
+    "project_id": "maalish-8cd54",
+    "storage_bucket": "maalish-8cd54.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:705284519438:android:cdb6245bd54bc100baae5f",
+        "android_client_info": {
+          "package_name": "com.maalish.app.maalish_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "705284519438-2mbmd0vs9hrigg02393qs4t5m62fl8qr.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.maalish.app.maalish_app",
+            "certificate_hash": "af8b742403ed8d3808c288340fa86f244f68a97f"
+          }
+        },
+        {
+          "client_id": "705284519438-bf5bevg39s23b878c2qrtpvqqbmlcv35.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.maalish.app.maalish_app",
+            "certificate_hash": "8f18cf6333e4ab58a4246ff345349e21a568ce30"
+          }
+        },
+        {
+          "client_id": "705284519438-ktos5s95i7sje781ok5vevp21ukp5vud.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCbBPm9psoE1IIRLGMb9QxNOgCyUDnwv7c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "705284519438-ktos5s95i7sje781ok5vevp21ukp5vud.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:705284519438:android:0527d9b946448d44baae5f",
+        "android_client_info": {
+          "package_name": "com.maalish.app.maalish_app.preview"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "705284519438-9j608nolq7dr5fo464d1k89rsrq7rl84.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.maalish.app.maalish_app.preview",
+            "certificate_hash": "5f6c8aa9c3f4e8d7e4429d351a9c93b47738aea1"
+          }
+        },
+        {
+          "client_id": "705284519438-ktos5s95i7sje781ok5vevp21ukp5vud.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCbBPm9psoE1IIRLGMb9QxNOgCyUDnwv7c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "705284519438-ktos5s95i7sje781ok5vevp21ukp5vud.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

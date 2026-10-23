@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import '../../services/ai_service.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_theme.dart';
@@ -19,6 +23,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool humor = true, memory = true, adviceOnlyWhenAsked = true, loading = true;
   List<String> memories = [];
   bool guest = false;
+  bool deleting = false, crashReports = false;
 
   @override
   void initState() { super.initState(); _load(); }
@@ -35,6 +40,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       adviceOnlyWhenAsked = p.adviceOnlyWhenAsked;
       memories = p.memories;
       guest = prefs.getBool('guest_mode') ?? false;
+      crashReports = prefs.getBool('crash_reports_enabled') ?? false;
       loading = false;
     });
   }
@@ -62,6 +68,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await prefs.setBool('guest_mode', true);
     try { await auth.ensureGuest().timeout(const Duration(seconds: 8)); } catch (_) {}
     await _load();
+  }
+
+  Future<void> _deleteAccount() async {
+    final user = auth.currentUser;
+    if (user == null || deleting) return;
+    final uid = user.uid;
+    final confirmed = await showDialog<bool>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('حذف حسابك وبياناتك؟'),
+      content: const Text('هتتحذف محادثاتك وذكرياتك وتفضيلاتك من الحساب. العملية نهائية. لو مسجل بجوجل هنطلب منك تأكيد الدخول بنفس الحساب.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx,false), child: const Text('رجوع')),
+        TextButton(onPressed: () => Navigator.pop(ctx,true), child: const Text('احذف الحساب'))]));
+    if (confirmed != true || !mounted) return;
+    setState(() => deleting = true);
+    try {
+      if (!user.isAnonymous) {
+        final result = await auth.signInWithGoogle();
+        if (result.user?.uid != uid) throw StateError('اختار نفس حساب Google لتأكيد الحذف.');
+      }
+      final token = await auth.idToken(forceRefresh: true).timeout(const Duration(seconds: 8));
+      final endpoint = Uri.parse(AiService.buildApiUrl).replace(path: '/account');
+      final response = await http.delete(endpoint,headers:{'Authorization':'Bearer $token'})
+        .timeout(const Duration(minutes: 2));
+      if (response.statusCode != 200) {
+        final data = jsonDecode(response.body) as Map<String,dynamic>;
+        throw StateError((data['error'] ?? 'تعذّر إكمال الحذف. جرّب تاني.').toString());
+      }
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in prefs.getKeys().where((k) => k.startsWith('$uid:')).toList()) { await prefs.remove(key); }
+      if (prefs.getString('maalish_legacy_owner') == uid) {
+        for (final key in ['nickname','style','humor','memory_enabled','advice_only_when_asked','memories_json','sessions_json','backend_url']) {
+          await prefs.remove(key); await prefs.remove('local:$key');
+        }
+      }
+      await auth.signOut();
+      await prefs.setBool('guest_mode',false);
+      if (mounted) Navigator.pushAndRemoveUntil(context,MaterialPageRoute<void>(builder: (_) => const AuthScreen()),(_) => false);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error is StateError ? error.message : 'الحذف ما اكتملش. راجع الاتصال وجرّب تاني.')));
+    } finally { if (mounted) setState(() => deleting = false); }
   }
 
   Future<void> _showMemories() async {
@@ -161,8 +206,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
           SwitchListTile(value: adviceOnlyWhenAsked, onChanged: (v) => setState(() => adviceOnlyWhenAsked = v), title: const Text('متدينيش نصايح إلا لما أطلب')),
           const SizedBox(height: 18),
           ElevatedButton(onPressed: _save, child: const Text('احفظ الإعدادات')),
+          SwitchListTile(value: crashReports, title: const Text('مشاركة تقارير الأعطال'),
+            subtitle: const Text('اختياري: معلومات تقنية عن الأعطال لمساعدتنا نصلحها. لا نضيف رسائلك أو ذكرياتك للتقارير.'),
+            onChanged: (value) async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('crash_reports_enabled',value);
+              await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(value);
+              if (mounted) setState(() => crashReports = value);
+            }),
           const Divider(height: 34),
           ListTile(onTap: _showMemories, title: const Text('معلش فاكر عني إيه؟'), trailing: const Icon(Icons.chevron_left_rounded)),
+          ListTile(enabled: !deleting, onTap: _deleteAccount, leading: const Icon(Icons.person_remove_outlined), title: Text(deleting ? 'جاري حذف الحساب…' : 'حذف الحساب وبياناته')),
           const ListTile(title: Text('الخصوصية'), subtitle: Text('الذاكرة والمحادثات بتتحفظ في حسابك مع نسخة محلية. تقدر تحذف كل محادثة أو معلومة لوحدها. رسائل المحادثة بتتبعت لخدمة Gemini عشان ترد عليك.'), trailing: Icon(Icons.lock_outline_rounded)),
         ],
       ),

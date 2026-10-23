@@ -15,7 +15,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isAuthenticated() { return request.auth != null; }
-    function isOwner(uid) { return isAuthenticated() && request.auth.uid == uid; }
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid
+        && (!exists(/databases/$(database)/documents/operationsUsers/$(uid))
+          || (get(/databases/$(database)/documents/operationsUsers/$(uid)).data.get('disabled',false) == false
+            && get(/databases/$(database)/documents/operationsUsers/$(uid)).data.get('deleting',false) == false));
+    }
     function uidUnchanged(data, uid) { return data.ownerId == uid && data.ownerId == request.auth.uid; }
     function uidNotModified() { return request.resource.data.ownerId == resource.data.ownerId; }
     function isValidState(data, uid) {

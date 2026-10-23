@@ -35,16 +35,27 @@ class _ChatScreenState extends State<ChatScreen> {
   String? saveError;
   int _storedCount = 0;
   final scroll = ScrollController();
+  StreamSubscription<void>? _syncSubscription;
+  bool syncPending = false;
   Timer? _replyTimer;
   String? requestError;
 
   @override
   void initState() {
     super.initState();
+    _syncSubscription = conversations.changes.listen((_) => _syncStatus());
     WidgetsBinding.instance.addPostFrameCallback((_) => _open());
   }
 
+  Future<void> _syncStatus() async {
+    final value = conversation;
+    if (value == null) return;
+    final waiting = await conversations.pending(value.id);
+    if (mounted && conversations.current) setState(() => syncPending = waiting);
+  }
+
   Future<void> _open() async {
+    unawaited(conversations.retryPending());
     try {
       if (widget.conversationId != null) {
         conversation = await conversations.open(widget.conversationId!);
@@ -183,6 +194,7 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void dispose() {
     _replyTimer?.cancel();
+    _syncSubscription?.cancel();
     scroll.dispose();
     input.dispose();
     super.dispose();
@@ -248,6 +260,7 @@ class _ChatScreenState extends State<ChatScreen> {
           actions: [IconButton(onPressed: _showTiming, tooltip: 'تفاصيل زمن الرد', icon: const Icon(Icons.timer_outlined))],
         ),
         body: Column(children: [
+          if (syncPending) const Padding(padding: EdgeInsets.all(6),child: Text('محفوظة على الجهاز · في انتظار المزامنة',style: TextStyle(fontSize:12))),
           if (saveError != null) MaterialBanner(content: Text(saveError!), actions: [
             TextButton(onPressed: () async { try { await _persist(); } catch (_) {} }, child: const Text('إعادة الحفظ')),
           ]),

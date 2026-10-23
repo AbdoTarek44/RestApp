@@ -1,4 +1,6 @@
 import { verifyFirebaseToken } from './auth.js';
+import { handleAdmin, appSettings, accountAllowed, trackRequest, deleteOwnAccount } from './operations.js';
+import { adminHtml, adminApp } from './admin-assets.js';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 const REPLY_SCHEMA = {
@@ -51,7 +53,7 @@ function json(data, status = 200, extraHeaders = {}) {
       'access-control-allow-origin': '*',
       'access-control-allow-headers': 'content-type,authorization',
       'cache-control': 'no-store',
-      'access-control-allow-methods': 'GET,POST,OPTIONS',
+      'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
       'access-control-expose-headers': 'server-timing,x-request-id',
       ...extraHeaders
     }
@@ -80,7 +82,7 @@ function acuteSafetySignal(text) {
   return patterns.some(p => p.test(value));
 }
 
-async function geminiGenerate(env, contents, systemInstruction, acute) {
+async function geminiGenerate(env, contents, systemInstruction, acute, config) {
   const model = env.MAALISH_MODEL || 'gemini-3.5-flash-lite';
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
   const response = await fetch(url, {
@@ -98,9 +100,9 @@ async function geminiGenerate(env, contents, systemInstruction, acute) {
       },
       contents,
       generationConfig: {
-        temperature: 0.65,
+        temperature: config.temperature,
         thinkingConfig: { thinkingLevel: 'minimal' },
-        maxOutputTokens: 1100,
+        maxOutputTokens: config.maxOutputTokens,
         response_mime_type: 'application/json',
         response_schema: REPLY_SCHEMA
       }
@@ -119,17 +121,40 @@ function geminiText(response) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const started = performance.now();
+    let identity, usage = {};
+    let tracked = false;
     const marks = {};
     const requestId = crypto.randomUUID();
-    const respond = (body, status = 200) => json(body, status, {
+    const respond = (body, status = 200) => {
+      if (identity && !tracked && ctx?.waitUntil) {
+        tracked = true;
+        ctx.waitUntil(trackRequest(env, identity, status, performance.now()-started, usage).catch(() => {}));
+      }
+      return json(body, status, {
       'server-timing': [...Object.entries(marks).map(([name, duration]) => `${name};dur=${duration.toFixed(1)}`), `total;dur=${(performance.now() - started).toFixed(1)}`].join(', '),
       'x-request-id': requestId
     });
+    };
     if (request.method === 'OPTIONS') return respond({ ok: true });
 
     const url = new URL(request.url);
+    if (url.pathname === '/account' && request.method === 'DELETE') return deleteOwnAccount(request,env);
+    if (url.pathname.startsWith('/api/admin/')) return handleAdmin(request,env);
+    if (['/admin','/admin/','/admin/app.js'].includes(url.pathname) && request.method === 'GET') {
+      const script = url.pathname.endsWith('.js');
+      return new Response(script ? adminApp : adminHtml, {headers:{
+        'content-type': script ? 'application/javascript; charset=utf-8' : 'text/html; charset=utf-8',
+        'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer',
+        'cross-origin-opener-policy':'same-origin-allow-popups',
+        'content-security-policy': "default-src 'self'; script-src 'self' https://www.gstatic.com https://apis.google.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://*.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://www.gstatic.com; frame-src https://maalish-8cd54.firebaseapp.com https://accounts.google.com; img-src 'self' data: https://*.googleusercontent.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+      }});
+    }
+    if (url.pathname === '/app-config' && request.method === 'GET') {
+      try { const config=await appSettings(env); return respond({announcement:config.announcement,maintenance:config.maintenance}); }
+      catch { return respond({error:'Configuration unavailable'},503); }
+    }
 
     if (url.pathname === '/health' && request.method === 'GET') {
       return respond({
@@ -154,10 +179,16 @@ export default {
     }
     const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
     const authStarted = performance.now();
-    let identity;
     try { identity = await verifyFirebaseToken(token, env.FIREBASE_PROJECT_ID); }
     catch { return respond({ error: 'Authentication required.' }, 401); }
     marks.auth = performance.now() - authStarted;
+    let config;
+    try {
+      const [settings,allowed] = await Promise.all([appSettings(env),accountAllowed(env,identity)]);
+      if (!allowed) return respond({error:'Account disabled.'},403);
+      config=settings;
+      if (config.maintenance) return respond({error:config.maintenanceMessage,maintenance:true},503);
+    } catch { return respond({error:'Service configuration unavailable.'},503); }
     const { success } = await env.CHAT_RATE_LIMITER.limit({ key: identity.sub });
     if (!success) return respond({ error: 'Too many requests.' }, 429);
     if (Number(request.headers.get('content-length')) > 65536) return respond({ error: 'Request too large.' }, 413);
@@ -202,8 +233,9 @@ export default {
         env,
         contents,
         `${SYSTEM_PROMPT}\nتفضيلات المستخدم: ${JSON.stringify(profileContext)}`,
-        acute
+        acute, config
       );
+      usage = response.usageMetadata || {};
       marks.gemini = performance.now() - geminiStarted;
       const parsed = JSON.parse(geminiText(response));
       if (!parsed || typeof parsed.text !== 'string' || !parsed.text.trim()) throw new Error('Invalid AI reply');

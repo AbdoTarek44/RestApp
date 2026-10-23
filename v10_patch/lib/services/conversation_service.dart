@@ -108,7 +108,19 @@ class ConversationService {
         }
         if (p.getInt(_revision(id)) == revision) await p.setBool(_dirty(id), false);
         _changes.add(null);
-      } catch (_) { /* Persisted local outbox retries on resume/history refresh. */ }
+      } catch (_) {
+        // Reconcile a remote tombstone instead of repeatedly attempting resurrection.
+        try {
+          final remote = await ref.get(const GetOptions(source: Source.server)).timeout(const Duration(seconds: 4));
+          if (remote.data()?['deleted'] == true && !value.deleted) {
+            final tombstone = value.copyWith(deleted:true,title:'',preview:'',summary:'',mood:'',messages:[]);
+            await p.setString(_key(id),jsonEncode(tombstone.toJson()));
+            await p.remove('$uid:pending_messages:$id');
+            await p.setBool(_dirty(id),false);
+            _changes.add(null);
+          }
+        } catch (_) { /* Outbox remains available for the next retry. */ }
+      }
     });
     _queues[queueKey] = next;
     await next;
@@ -153,6 +165,13 @@ class ConversationService {
       try {
         final meta = await ref.get().timeout(const Duration(seconds: 8));
         if (meta.data()?['deleted'] == true) throw StateError('Conversation deleted');
+        final d = meta.data();
+        if (d != null && !await pending(id)) {
+          value = Conversation(id:id,title:d['title'] as String,preview:d['preview'] as String,
+            summary:d['summary'] as String? ?? '',mood:d['mood'] as String,
+            closed:d['closed']==true,createdAt:(d['createdAt'] as Timestamp).toDate(),
+            lastMessageAt:(d['lastMessageAt'] as Timestamp).toDate(),messages:value?.messages ?? []);
+        }
         final remote = await ref.collection('messages').get().timeout(const Duration(seconds: 8));
         final merged = <String, SavedMessage>{for (final m in value?.messages ?? <SavedMessage>[]) m.id: m};
         for (final doc in remote.docs) {

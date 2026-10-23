@@ -45,7 +45,7 @@ jobs:
           p = Path('app/pubspec.yaml')
           s = p.read_text().replace('version: 0.2.0+2','version: 0.10.0+10')
           if 'firebase_core:' not in s:
-              s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.1.0\n  firebase_auth: ^7.0.1\n  google_sign_in: ^7.2.0\n  cloud_firestore: ^7.1.0')
+              s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.1.0\n  firebase_auth: ^7.0.1\n  google_sign_in: ^7.2.0\n  cloud_firestore: ^7.1.0\n  firebase_crashlytics: ^6.0.0')
           if 'flutter_test:' not in s:
               s += '\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n  flutter_lints: ^6.0.0\n'
           p.write_text(s)
@@ -105,4 +105,3 @@ jobs:
             Maalish-v10-preview.apk
             Maalish-v10-signing.txt
           if-no-files-found: error
-

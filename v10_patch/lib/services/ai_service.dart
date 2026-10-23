@@ -94,6 +94,14 @@ class AiService {
     for (final match in RegExp(r'([a-z_]+);dur=([0-9.]+)').allMatches(response.headers['server-timing'] ?? '')) {
       trace.timings['server_${match.group(1)}'] = double.parse(match.group(2)!).round();
     }
+    if (response.statusCode == 503) {
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['maintenance'] == true && body['error'] is String) {
+          throw AiRequestException(body['error'] as String);
+        }
+      } on AiRequestException { rethrow; } catch (_) {}
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw AiRequestException(response.statusCode == 401
           ? 'جلسة الدخول محتاجة تتجدد. جرّب تاني أو سجل الدخول من جديد.'
