@@ -93,7 +93,8 @@ class _HistoryScreenState extends State<HistoryScreen> with WidgetsBindingObserv
               }, child: const Text('ابدأ محادثة من الملخص'))])),
           trailing: IconButton(tooltip: 'حذف الملخص', icon: const Icon(Icons.delete_outline), onPressed: () async {
             if (await _confirm()) { await memory.deleteSession(item.id); await _load(); }
-          }))),
+          })))),
       ],
     ])));
 }
+
