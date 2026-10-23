@@ -21,8 +21,8 @@ class AiService {
   Future<MaalishReply> reply(List<ChatMessage> messages) async {
     if (messages.isEmpty) return fallback.reply('');
     final latest = messages.last.text;
-    final profile = await memory.load();
-    final rawUrl = profile.backendUrl.trim().isNotEmpty ? profile.backendUrl.trim() : buildApiUrl;
+    final profile = await memory.load(waitForCloud: false);
+    final rawUrl = buildApiUrl.trim();
     if (rawUrl.isEmpty) return fallback.reply(latest);
 
     try {
