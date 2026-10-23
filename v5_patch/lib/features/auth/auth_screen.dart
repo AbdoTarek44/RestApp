@@ -57,7 +57,7 @@ class _AuthScreenState extends State<AuthScreen> {
       await auth.signInWithGoogle();
       await _completeLogin();
     } catch (e) {
-      _show('مقدرناش نسجل بـGoogle: $e');
+      _show('مقدرناش نكمل الدخول بـGoogle. جرّب تاني أو ادخل كضيف مؤقتًا.');
     } finally {
       if (mounted) setState(() => loading = false);
     }
