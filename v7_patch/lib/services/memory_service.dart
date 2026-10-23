@@ -194,13 +194,17 @@ class MemoryService {
 
   }
 
-  Future<MemoryProfile> load() async {
+  Future<MemoryProfile> load({bool waitForCloud = true}) async {
 
     final scope = _uid ?? 'local';
 
     final p = await SharedPreferences.getInstance();
 
-    await _hydrate(p);
+    if (waitForCloud) {
+      await _hydrate(p);
+    } else {
+      unawaited(_hydrate(p).catchError((_) {}));
+    }
 
     if ((_uid ?? 'local') != scope) throw StateError('Account changed');
 
