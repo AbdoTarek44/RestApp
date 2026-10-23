@@ -1,3 +1,4 @@
+import { verifyFirebaseToken } from './auth.js';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 const REPLY_SCHEMA = {
@@ -45,7 +46,8 @@ function json(data, status = 200) {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'access-control-allow-origin': '*',
-      'access-control-allow-headers': 'content-type',
+      'access-control-allow-headers': 'content-type,authorization',
+      'cache-control': 'no-store',
       'access-control-allow-methods': 'GET,POST,OPTIONS'
     }
   });
@@ -77,6 +79,7 @@ async function geminiGenerate(env, contents, systemInstruction, acute) {
   const model = env.MAALISH_MODEL || 'gemini-3.1-flash-lite';
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
   const response = await fetch(url, {
+    signal: AbortSignal.timeout(25000),
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -133,8 +136,32 @@ export default {
       return json({ error: 'GEMINI_API_KEY is not configured.' }, 503);
     }
 
+    if (!env.FIREBASE_PROJECT_ID || !env.CHAT_RATE_LIMITER) {
+      return json({ error: 'Service configuration incomplete.' }, 503);
+    }
+    const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
+    let identity;
+    try { identity = await verifyFirebaseToken(token, env.FIREBASE_PROJECT_ID); }
+    catch { return json({ error: 'Authentication required.' }, 401); }
+    const { success } = await env.CHAT_RATE_LIMITER.limit({ key: identity.sub });
+    if (!success) return json({ error: 'Too many requests.' }, 429);
+    if (Number(request.headers.get('content-length')) > 65536) return json({ error: 'Request too large.' }, 413);
     let body;
-    try { body = await request.json(); } catch { return json({ error: 'Invalid JSON.' }, 400); }
+    try {
+      const reader = request.body?.getReader();
+      if (!reader) return json({ error: 'Invalid JSON.' }, 400);
+      const chunks = []; let size = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 65536) { await reader.cancel(); return json({ error: 'Request too large.' }, 413); }
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(size); let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      body = JSON.parse(new TextDecoder().decode(bytes));
+    } catch { return json({ error: 'Invalid JSON.' }, 400); }
 
     const contents = normalizeMessages(body?.messages);
     if (!contents.length) return json({ error: 'messages is required.' }, 400);
@@ -161,6 +188,7 @@ export default {
         acute
       );
       const parsed = JSON.parse(geminiText(response));
+      if (!parsed || typeof parsed.text !== 'string' || !parsed.text.trim()) throw new Error('Invalid AI reply');
       parsed.intensity = Math.max(1, Math.min(10, Number(parsed.intensity || 5)));
       if (!Array.isArray(parsed.categories)) parsed.categories = ['other'];
       if (!Array.isArray(parsed.memoryCandidates)) parsed.memoryCandidates = [];
