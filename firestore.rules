@@ -1,0 +1,31 @@
+// Prototype rules: one private state document per authenticated Firebase UID.
+// users/{uid}/state/current:
+// ownerId: immutable string, 1..128 chars, must equal path UID and auth UID.
+// profileJson: opaque JSON string, <=16384 chars; contains client-owned preferences.
+// sessionsJson: opaque JSON string, <=262144 chars; contains session summaries.
+// JSON contents never grant permissions. They are decoded defensively by the app.
+// updatedAt: required server timestamp. No other fields or document paths allowed.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() { return request.auth != null; }
+    function isOwner(uid) { return isAuthenticated() && request.auth.uid == uid; }
+    function uidUnchanged(data, uid) { return data.ownerId == uid && data.ownerId == request.auth.uid; }
+    function uidNotModified() { return request.resource.data.ownerId == resource.data.ownerId; }
+    function isValidState(data, uid) {
+      return data.keys().hasAll(['ownerId', 'profileJson', 'sessionsJson', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'profileJson', 'sessionsJson', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128
+        && uidUnchanged(data, uid)
+        && data.profileJson is string && data.profileJson.size() <= 16384
+        && data.sessionsJson is string && data.sessionsJson.size() <= 262144
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+    match /users/{uid}/state/{stateId} {
+      allow read, delete: if stateId == 'current' && isOwner(uid);
+      allow create: if stateId == 'current' && isOwner(uid) && isValidState(request.resource.data, uid);
+      allow update: if stateId == 'current' && isOwner(uid) && uidNotModified() && isValidState(request.resource.data, uid);
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
