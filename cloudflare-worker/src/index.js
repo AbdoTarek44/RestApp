@@ -78,7 +78,7 @@ function acuteSafetySignal(text) {
 }
 
 async function geminiGenerate(env, contents, systemInstruction, acute) {
-  const model = env.MAALISH_MODEL || 'gemini-3.1-flash-lite';
+  const model = env.MAALISH_MODEL || 'gemini-3.5-flash-lite';
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
   const response = await fetch(url, {
     signal: AbortSignal.timeout(12000),
@@ -96,6 +96,7 @@ async function geminiGenerate(env, contents, systemInstruction, acute) {
       contents,
       generationConfig: {
         temperature: 0.65,
+        thinkingConfig: { thinkingLevel: 'minimal' },
         maxOutputTokens: 700,
         response_mime_type: 'application/json',
         response_schema: REPLY_SCHEMA
@@ -132,7 +133,7 @@ export default {
         ok: true,
         service: 'maalish-ai',
         provider: 'gemini',
-        model: env.MAALISH_MODEL || 'gemini-3.1-flash-lite',
+        model: env.MAALISH_MODEL || 'gemini-3.5-flash-lite',
         keyConfigured: Boolean(env.GEMINI_API_KEY)
       });
     }
