@@ -1,0 +1,17 @@
+name: Verify Cloudflare Worker
+on:
+  push:
+    paths: ['cloudflare-worker/**', '.github/workflows/test-worker.yml']
+  pull_request:
+    paths: ['cloudflare-worker/**', '.github/workflows/test-worker.yml']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test cloudflare-worker/test/worker.test.js
