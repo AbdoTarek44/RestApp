@@ -24,3 +24,6 @@ Local commands:
 Wrangler secrets persist across updates; never commit GEMINI_API_KEY. Configure Cloudflare CI credentials separately if automated deployment is desired.
 
 V8 fixes: reset Google Credential Manager sign-in session before explicit authentication; reply generation uses cached preferences without waiting for Firestore; display the AI reply before background memory persistence; remove the backend URL field from the user profile and use the configured service endpoint exclusively. Registered the actual V7 APK certificate after independently extracting its V2 signing block. Measured service response at ~1.9s first and ~1.1s warm in one two-request smoke test (device/network timings vary).
+
+
+V8 preview builds use an independent Android application ID (`com.maalish.app.maalish_app.preview`) and Firebase Android app so they can coexist with V7 without deleting local data. They still use the same Firebase project, Google users and Firestore database. A dedicated development keystore is restored with GitHub Actions cache and explicitly selected by Gradle; it is not committed and must not be used for production. Cache eviction may require new certificate registration and a migration plan. The original V7 Google login was confirmed working by the user after actual certificate registration.
