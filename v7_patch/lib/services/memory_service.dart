@@ -280,6 +280,15 @@ class MemoryService {
 
   }
 
+  Future<void> deleteSession(String id) async {
+    final scope = _uid ?? 'local';
+    final sessions = await loadSessions();
+    if ((_uid ?? 'local') != scope) throw StateError('Account changed');
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_key(scope, _sessions), jsonEncode(sessions.where((s) => s.id != id).map((s) => s.toJson()).toList()));
+    await _changed(p, scope == 'local' ? null : scope);
+  }
+
   Future<void> clearSessions() async { final scope = _uid ?? 'local';
 
     final p = await SharedPreferences.getInstance(); await _hydrate(p); if ((_uid ?? 'local') != scope) return; await p.remove(_key(scope, _sessions)); await _changed(p, scope == 'local' ? null : scope); }
