@@ -120,7 +120,7 @@ const safeUser = user => ({uid:user.localId,email:user.email||'',name:user.displ
 async function audit(env,identity,action,target) {
   await put(env,'operationsAudit/'+crypto.randomUUID(),{admin:identity.email,action,target,at:new Date().toISOString()});
 }
-export async function handleAdmin(request,env) {
+export async function handleAdmin(request,env,userStatusChanged) {
   const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store',
     'x-content-type-options':'nosniff','content-security-policy':"default-src 'none'; frame-ancestors 'none'"};
   const respond=(body,status=200)=>new Response(JSON.stringify(body),{status,headers});
@@ -169,6 +169,7 @@ export async function handleAdmin(request,env) {
         if(body.disabled) await put(env,'operationsUsers/'+body.uid,{disabled:true});
         await googleRequest(env,auth(env)+':update','POST',{localId:body.uid,disableUser:body.disabled});
         if(!body.disabled) await put(env,'operationsUsers/'+body.uid,{disabled:false});
+        if(userStatusChanged) await userStatusChanged(env,body.uid,body.disabled);
         await audit(env,identity,'user-status-applied',body.uid+':'+body.disabled);
         return respond({ok:true});
       }
@@ -185,7 +186,7 @@ export async function handleAdmin(request,env) {
   }catch{return respond({error:'تعذّر تنفيذ العملية. جرّب تاني.'},503);}
 }
 
-export async function deleteOwnAccount(request,env) {
+export async function deleteOwnAccount(request,env,beforePurge) {
   const respond=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json','cache-control':'no-store','access-control-allow-origin':'*'}});
   const token=request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
   let identity;
@@ -196,6 +197,7 @@ export async function deleteOwnAccount(request,env) {
     return respond({error:'سجّل الدخول بجوجل من جديد لتأكيد الحذف.'},401);
   try{
     await put(env,'operationsUsers/'+identity.sub,{disabled:true,deleting:true});
+    if(beforePurge) await beforePurge(env,identity.sub);
     // Deny client writes while recursively purging. Repeating the operation is safe.
     async function purge(path) {
       const result=await googleRequest(env,db(env)+'/'+path+':listCollectionIds','POST',{pageSize:100});

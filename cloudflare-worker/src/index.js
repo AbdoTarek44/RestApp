@@ -1,5 +1,6 @@
+import {handleEngagement,adminEngagement,deleteEngagementData,setUserPushStatus} from './engagement.js';
 import { verifyFirebaseToken } from './auth.js';
-import { handleAdmin, appSettings, accountAllowed, trackRequest, deleteOwnAccount } from './operations.js';
+import { handleAdmin, appSettings, accountAllowed, trackRequest, deleteOwnAccount, requireAdmin } from './operations.js';
 import { adminHtml, adminApp, privacyHtml, deletionHtml } from './admin-assets.js';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -151,8 +152,13 @@ export default {
         'content-type':'text/html; charset=utf-8','cache-control':'no-cache','x-content-type-options':'nosniff',
         'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"}});
     }
-    if (url.pathname === '/account' && request.method === 'DELETE') return deleteOwnAccount(request,env);
-    if (url.pathname.startsWith('/api/admin/')) return handleAdmin(request,env);
+    if (url.pathname === '/account' && request.method === 'DELETE') return deleteOwnAccount(request,env,deleteEngagementData);
+    if(url.pathname.startsWith('/push/') || url.pathname.startsWith('/insights/')) return handleEngagement(request,env);
+    if(url.pathname.startsWith('/api/admin/notifications') || url.pathname==='/api/admin/insights') {
+      let admin; try{admin=await requireAdmin(request,env);}catch{return respond({error:'الدخول للإدارة محتاج حساب مصرّح له وتسجيل دخول حديث.'},403);}
+      return adminEngagement(request,env,admin);
+    }
+    if (url.pathname.startsWith('/api/admin/')) return handleAdmin(request,env,setUserPushStatus);
     if (['/admin','/admin/','/admin/app.js'].includes(url.pathname) && request.method === 'GET') {
       const script = url.pathname.endsWith('.js');
       return new Response(script ? adminApp : adminHtml, {headers:{

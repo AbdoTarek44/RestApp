@@ -11,7 +11,7 @@ if target.exists():
     raise SystemExit('app/ already exists; use a fresh build directory.')
 parts = sorted((root / 'build_src_v2_small').glob('part_*.b64'))
 archive = zipfile.ZipFile(io.BytesIO(base64.b64decode(''.join(p.read_text() for p in parts))))
-patches = [root / name / 'lib' for name in ('v3_patch', 'v4_patch', 'v5_patch', 'v7_patch', 'v10_patch')]
+patches = [root / name / 'lib' for name in ('v3_patch', 'v4_patch', 'v5_patch', 'v7_patch', 'v10_patch', 'v11_patch')]
 for entry in archive.infolist():
     path = Path(entry.filename)
     if path.is_absolute() or '..' in path.parts or path.parts[0] != 'maalish_app':
