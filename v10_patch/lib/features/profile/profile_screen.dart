@@ -46,13 +46,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _save() async {
-    await service.save(MemoryProfile(
+    final latest = await service.load();
+    await service.save(latest.copyWith(
       nickname: name.text.trim(),
       style: style,
       humor: humor,
       memoryEnabled: memory,
       adviceOnlyWhenAsked: adviceOnlyWhenAsked,
-      memories: memories,
     ));
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتحفظت إعداداتك')));
   }
@@ -95,6 +95,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         throw StateError((data['error'] ?? 'تعذّر إكمال الحذف. جرّب تاني.').toString());
       }
       final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('purge_firestore_cache',true);
       for (final key in prefs.getKeys().where((k) => k.startsWith('$uid:')).toList()) { await prefs.remove(key); }
       if (prefs.getString('maalish_legacy_owner') == uid) {
         for (final key in ['nickname','style','humor','memory_enabled','advice_only_when_asked','memories_json','sessions_json','backend_url']) {

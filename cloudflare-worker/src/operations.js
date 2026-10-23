@@ -87,7 +87,8 @@ export async function trackRequest(env,identity,status,duration,usage={}) {
   if (!env.GOOGLE_OPERATIONS_CREDENTIALS) return;
   const day=new Date().toISOString().slice(0,10);
   const counts={requests:1,successes:status===200?1:0,errors:status===200?0:1,
-    durationMs:duration,inputTokens:usage.promptTokenCount||0,outputTokens:usage.candidatesTokenCount||0};
+    durationMs:duration,inputTokens:usage.promptTokenCount||0,
+    outputTokens:(usage.candidatesTokenCount||0)+(usage.thoughtsTokenCount||0)};
   // No message, summary, mood, memory, or category is collected here.
   await Promise.all([
     increment(env,'operationsDaily/'+day,counts,{day,model:env.MAALISH_MODEL||'gemini-3.5-flash-lite'}),
@@ -156,8 +157,9 @@ export async function handleAdmin(request,env) {
         const user=target?.users?.[0]; if(!user)return respond({error:'الحساب غير موجود'},404);
         if(String(env.ADMIN_EMAILS).toLowerCase().split(',').includes(String(user.email).toLowerCase()))return respond({error:'حساب إدارة محمي'},400);
         await audit(env,identity,'user-status-requested',body.uid+':'+body.disabled);
+        if(body.disabled) await put(env,'operationsUsers/'+body.uid,{disabled:true});
         await googleRequest(env,auth(env)+':update','POST',{localId:body.uid,disableUser:body.disabled});
-        await put(env,'operationsUsers/'+body.uid,{disabled:body.disabled});
+        if(!body.disabled) await put(env,'operationsUsers/'+body.uid,{disabled:false});
         await audit(env,identity,'user-status-applied',body.uid+':'+body.disabled);
         return respond({ok:true});
       }
@@ -199,6 +201,18 @@ export async function deleteOwnAccount(request,env) {
       await googleRequest(env,db(env)+'/'+path,'DELETE');
     }
     await purge('users/'+identity.sub);
+    // Purge per-account activity identifiers as well; aggregate daily totals remain.
+    while (true) {
+      const matches=await googleRequest(env,db(env)+':runQuery','POST',{structuredQuery:{
+        from:[{collectionId:'users',allDescendants:true}],
+        where:{fieldFilter:{field:{fieldPath:'uid'},op:'EQUAL',value:{stringValue:identity.sub}}},limit:100}});
+      const docs=(matches||[]).filter(v=>v.document).map(v=>v.document.name);
+      if(!docs.length)break;
+      for(const name of docs){
+        if(!name.startsWith(`projects/${env.FIREBASE_PROJECT_ID}/databases/maalish/documents/operationsActivity/`))throw new Error('Unexpected activity path');
+        await googleRequest(env,'https://firestore.googleapis.com/v1/'+name,'DELETE');
+      }
+    }
     const response=await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`,{
       method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({idToken:token}),signal:AbortSignal.timeout(8000)});
     if(!response.ok)throw new Error('Account deletion incomplete');

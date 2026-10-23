@@ -76,18 +76,17 @@ class AiService {
     final remaining = replyBudget.inMilliseconds - trace.clock.elapsedMilliseconds;
     if (remaining <= 0) throw TimeoutException('Reply deadline reached');
     final recent = messages.skip(messages.length > 20 ? messages.length - 20 : 0).toList();
-    while (recent.length > 1 && utf8.encode(jsonEncode(recent.map((m) => m.text).toList())).length > 38000) {
-      recent.removeAt(0);
-    }
+    Map<String,dynamic> payload() => {
+      'conversationSummary': conversationSummary,
+      'messages': recent.map((m) => {'role':m.fromUser ? 'user':'assistant','content':m.text}).toList(),
+      'profile': {'nickname':profile.nickname,'style':profile.style,'humor':profile.humor,
+        'adviceOnlyWhenAsked':profile.adviceOnlyWhenAsked,
+        'memories':profile.memoryEnabled ? profile.memories : <String>[]},
+    };
+    while (recent.length > 1 && utf8.encode(jsonEncode(payload())).length > 60000) { recent.removeAt(0); }
     final response = await client.post(chat,
-      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
-      body: jsonEncode({
-        'conversationSummary': conversationSummary,
-        'messages': recent.map((m) => {'role': m.fromUser ? 'user' : 'assistant', 'content': m.text}).toList(),
-        'profile': {'nickname': profile.nickname, 'style': profile.style, 'humor': profile.humor,
-          'adviceOnlyWhenAsked': profile.adviceOnlyWhenAsked,
-          'memories': profile.memoryEnabled ? profile.memories : <String>[]},
-      }),
+      headers: {'Content-Type':'application/json','Authorization':'Bearer $token'},
+      body:jsonEncode(payload()),
     ).timeout(Duration(milliseconds: remaining));
     trace.complete();
     trace.requestId = response.headers['x-request-id'];

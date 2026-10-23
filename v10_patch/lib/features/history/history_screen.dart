@@ -17,7 +17,7 @@ class _HistoryScreenState extends State<HistoryScreen> with WidgetsBindingObserv
   final memory = MemoryService();
   List<Conversation> conversations = [];
   List<VentSession> legacy = [];
-  bool loading = true;
+  bool loading = true, refreshing = true;
   String? notice;
   StreamSubscription<void>? subscription;
   @override
@@ -38,6 +38,7 @@ class _HistoryScreenState extends State<HistoryScreen> with WidgetsBindingObserv
     if (mounted && service.current) setState(() { conversations = data; loading = false; });
   }
   Future<void> _load() async {
+    if (mounted) setState(() => refreshing = true);
     if (!service.current) service = ConversationService();
     await _local();
     try {
@@ -49,6 +50,7 @@ class _HistoryScreenState extends State<HistoryScreen> with WidgetsBindingObserv
       if (mounted) setState(() => notice = 'بتشوف النسخة المحفوظة على الجهاز. اسحب لتحديث المزامنة.');
     }
     await _local();
+    if (mounted) setState(() => refreshing = false);
   }
   Future<bool> _confirm() async => await showDialog<bool>(context: context,
     builder: (ctx) => AlertDialog(title: const Text('حذف الفضفضة؟'),
@@ -63,7 +65,7 @@ class _HistoryScreenState extends State<HistoryScreen> with WidgetsBindingObserv
       const SizedBox(height: 8),
       const Text('افتح أي فضفضة وكمّل من آخر نقطة. كلامك بيتحفظ تلقائيًا.'),
       if (notice != null) Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: Text(notice!)),
-      if (loading) const LinearProgressIndicator(),
+      if (loading || refreshing) const LinearProgressIndicator(),
       if (!loading && conversations.isEmpty && legacy.isEmpty)
         const Padding(padding: EdgeInsets.all(30), child: Text('أول فضفضة هتبدأها هتلاقيها هنا.')),
       ...conversations.map((item) => Card(child: ListTile(

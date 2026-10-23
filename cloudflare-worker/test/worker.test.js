@@ -60,3 +60,50 @@ test('unconfigured worker fails closed', async () => {
   assert.equal((await worker.fetch(chat(),{})).status,503);
   assert.equal((await worker.fetch(chat(),{GEMINI_API_KEY:'x'})).status,503);
 });
+
+test('admin access requires verified Google identity, allowlist and recent live account', async () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\n'+Buffer.from(await crypto.subtle.exportKey('pkcs8',pair.privateKey)).toString('base64')+'\n-----END PRIVATE KEY-----';
+  const adminEnv={...env,ADMIN_EMAILS:'owner@example.com',GOOGLE_OPERATIONS_CREDENTIALS:JSON.stringify({client_email:'operations@example.com',private_key:pem})};
+  const previous=globalThis.fetch;
+  let disabled=false;const writes=[];
+  globalThis.fetch=async(url,options={})=>{
+    const path=String(url);
+    if(path.includes('/jwk/'))return Response.json({keys:[jwk]});
+    if(path.includes('oauth2.googleapis.com'))return Response.json({access_token:'fake-operations-token',expires_in:3600});
+    if(path.includes('accounts:lookup')){
+      const body=JSON.parse(options.body);
+      return Response.json({users:[{localId:body.localId?.[0]||'target',email:body.localId?.[0]==='guest-1'?'owner@example.com':'user@example.com',disabled,validSince:'1'}]});
+    }
+    if(path.includes('accounts:batchGet'))return Response.json({users:[{localId:'target',email:'user@example.com',passwordHash:'MUST NOT LEAK',salt:'PRIVATE',providerUserInfo:[{providerId:'google.com'}]}]});
+    if(path.includes('accounts:update')){writes.push({url:path,body:JSON.parse(options.body)});return Response.json({localId:'target'});}
+    if(path.includes('firestore.googleapis.com')){writes.push({url:path,body:options.body?JSON.parse(options.body):null});return Response.json({});}
+    throw new Error('Unexpected admin request');
+  };
+  const adminClaims={email:'owner@example.com',email_verified:true,firebase:{sign_in_provider:'google.com'}};
+  async function request(claims=adminClaims,path='/api/admin/users',body,origin='https://example.com'){
+    const signed=await token(claims);
+    return worker.fetch(new Request('https://example.com'+path,{method:body?'POST':'GET',headers:{authorization:`Bearer ${signed}`,origin,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),adminEnv);
+  }
+  try{
+    assert.equal((await request({})).status,403);
+    assert.equal((await request({...adminClaims,email:'outsider@example.com'})).status,403);
+    assert.equal((await request({...adminClaims,email_verified:false})).status,403);
+    assert.equal((await request({...adminClaims,firebase:{sign_in_provider:'anonymous'}})).status,403);
+    assert.equal((await request({...adminClaims,auth_time:Math.floor(Date.now()/1000)-1900})).status,403);
+    disabled=true;assert.equal((await request()).status,403);disabled=false;
+    const allowed=await request();assert.equal(allowed.status,200);
+    const body=await allowed.json();assert.equal(body.users[0].email,'user@example.com');
+    assert.equal(JSON.stringify(body).includes('MUST NOT LEAK'),false);
+    assert.equal(JSON.stringify(body).includes('PRIVATE'),false);
+    assert.equal((await request(adminClaims,'/api/admin/user-status',{uid:'target',disabled:true},'https://evil.example')).status,403);
+    assert.equal((await request(adminClaims,'/api/admin/user-status',{uid:'guest-1',disabled:true})).status,400);
+    assert.equal((await request(adminClaims,'/api/admin/settings',{isAdmin:true})).status,400);
+    assert.equal((await request(adminClaims,'/api/admin/user-status',{uid:'target',disabled:true})).status,200);
+    assert.ok(writes.some(w=>w.url.includes('accounts:update')&&w.body.disableUser===true));
+    assert.ok(writes.some(w=>w.url.includes('operationsUsers/target')&&w.body.fields.disabled.booleanValue));
+    assert.ok(writes.filter(w=>w.url.includes('operationsAudit/')).length>=2);
+    const settings={maintenance:false,maintenanceMessage:'Soon',announcement:'Hello',temperature:.65,maxOutputTokens:1100,inputPrice:0,outputPrice:0};
+    assert.equal((await request(adminClaims,'/api/admin/settings',settings)).status,200);
+    assert.equal((await request(adminClaims,'/api/admin/settings',{...settings,temperature:9})).status,400);
+  }finally{globalThis.fetch=previous;}
+});

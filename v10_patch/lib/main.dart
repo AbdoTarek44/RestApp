@@ -1,4 +1,6 @@
 import 'dart:ui';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +15,12 @@ Future<void> main() async {
   try { await AuthService.initialize(); } catch (_) {}
   if (AuthService.ready) {
     final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('purge_firestore_cache') == true) {
+      try {
+        await FirebaseFirestore.instanceFor(app:Firebase.app(),databaseId:'maalish').clearPersistence();
+        await prefs.remove('purge_firestore_cache');
+      } catch (_) { /* Retry before Firestore starts on the next launch. */ }
+    }
     try {
       await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(prefs.getBool('crash_reports_enabled') ?? false);
       FlutterError.onError = (details) {

@@ -1,5 +1,8 @@
 # Maalish integration
 
+Historical V7/V8 notes below. Current V10 behavior, administration, validation and
+publication limits are documented in [RELEASE.md](RELEASE.md).
+
 Firebase: `maalish-8cd54` (Google and anonymous sign-in enabled).
 Android: `com.maalish.app.maalish_app`.
 Firestore: Enterprise native database `maalish`, `europe-west3`, free tier enabled.

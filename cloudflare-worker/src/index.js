@@ -1,6 +1,6 @@
 import { verifyFirebaseToken } from './auth.js';
 import { handleAdmin, appSettings, accountAllowed, trackRequest, deleteOwnAccount } from './operations.js';
-import { adminHtml, adminApp } from './admin-assets.js';
+import { adminHtml, adminApp, privacyHtml, deletionHtml } from './admin-assets.js';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 const REPLY_SCHEMA = {
@@ -140,6 +140,11 @@ export default {
     if (request.method === 'OPTIONS') return respond({ ok: true });
 
     const url = new URL(request.url);
+    if (['/privacy','/delete-account'].includes(url.pathname) && request.method==='GET') {
+      return new Response(url.pathname==='/privacy'?privacyHtml:deletionHtml,{headers:{
+        'content-type':'text/html; charset=utf-8','cache-control':'no-cache','x-content-type-options':'nosniff',
+        'content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"}});
+    }
     if (url.pathname === '/account' && request.method === 'DELETE') return deleteOwnAccount(request,env);
     if (url.pathname.startsWith('/api/admin/')) return handleAdmin(request,env);
     if (['/admin','/admin/','/admin/app.js'].includes(url.pathname) && request.method === 'GET') {
