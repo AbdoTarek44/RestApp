@@ -40,7 +40,7 @@ const SYSTEM_PROMPT = `
 - الرد الأخير ممكن ينتهي بـ"معلش" فقط لما تكون لحظة مناسبة، مش في كل رسالة.
 `;
 
-function json(data, status = 200) {
+function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
@@ -48,7 +48,9 @@ function json(data, status = 200) {
       'access-control-allow-origin': '*',
       'access-control-allow-headers': 'content-type,authorization',
       'cache-control': 'no-store',
-      'access-control-allow-methods': 'GET,POST,OPTIONS'
+      'access-control-allow-methods': 'GET,POST,OPTIONS',
+      'access-control-expose-headers': 'server-timing,x-request-id',
+      ...extraHeaders
     }
   });
 }
@@ -79,7 +81,7 @@ async function geminiGenerate(env, contents, systemInstruction, acute) {
   const model = env.MAALISH_MODEL || 'gemini-3.1-flash-lite';
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(model)}:generateContent`;
   const response = await fetch(url, {
-    signal: AbortSignal.timeout(25000),
+    signal: AbortSignal.timeout(12000),
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -114,12 +116,19 @@ function geminiText(response) {
 
 export default {
   async fetch(request, env) {
-    if (request.method === 'OPTIONS') return json({ ok: true });
+    const started = performance.now();
+    const marks = {};
+    const requestId = crypto.randomUUID();
+    const respond = (body, status = 200) => json(body, status, {
+      'server-timing': [...Object.entries(marks).map(([name, duration]) => `${name};dur=${duration.toFixed(1)}`), `total;dur=${(performance.now() - started).toFixed(1)}`].join(', '),
+      'x-request-id': requestId
+    });
+    if (request.method === 'OPTIONS') return respond({ ok: true });
 
     const url = new URL(request.url);
 
     if (url.pathname === '/health' && request.method === 'GET') {
-      return json({
+      return respond({
         ok: true,
         service: 'maalish-ai',
         provider: 'gemini',
@@ -129,42 +138,44 @@ export default {
     }
 
     if (url.pathname !== '/chat' || request.method !== 'POST') {
-      return json({ error: 'Not found' }, 404);
+      return respond({ error: 'Not found' }, 404);
     }
 
     if (!env.GEMINI_API_KEY) {
-      return json({ error: 'GEMINI_API_KEY is not configured.' }, 503);
+      return respond({ error: 'GEMINI_API_KEY is not configured.' }, 503);
     }
 
     if (!env.FIREBASE_PROJECT_ID || !env.CHAT_RATE_LIMITER) {
-      return json({ error: 'Service configuration incomplete.' }, 503);
+      return respond({ error: 'Service configuration incomplete.' }, 503);
     }
     const token = request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
+    const authStarted = performance.now();
     let identity;
     try { identity = await verifyFirebaseToken(token, env.FIREBASE_PROJECT_ID); }
-    catch { return json({ error: 'Authentication required.' }, 401); }
+    catch { return respond({ error: 'Authentication required.' }, 401); }
+    marks.auth = performance.now() - authStarted;
     const { success } = await env.CHAT_RATE_LIMITER.limit({ key: identity.sub });
-    if (!success) return json({ error: 'Too many requests.' }, 429);
-    if (Number(request.headers.get('content-length')) > 65536) return json({ error: 'Request too large.' }, 413);
+    if (!success) return respond({ error: 'Too many requests.' }, 429);
+    if (Number(request.headers.get('content-length')) > 65536) return respond({ error: 'Request too large.' }, 413);
     let body;
     try {
       const reader = request.body?.getReader();
-      if (!reader) return json({ error: 'Invalid JSON.' }, 400);
+      if (!reader) return respond({ error: 'Invalid JSON.' }, 400);
       const chunks = []; let size = 0;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > 65536) { await reader.cancel(); return json({ error: 'Request too large.' }, 413); }
+        if (size > 65536) { await reader.cancel(); return respond({ error: 'Request too large.' }, 413); }
         chunks.push(value);
       }
       const bytes = new Uint8Array(size); let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
       body = JSON.parse(new TextDecoder().decode(bytes));
-    } catch { return json({ error: 'Invalid JSON.' }, 400); }
+    } catch { return respond({ error: 'Invalid JSON.' }, 400); }
 
     const contents = normalizeMessages(body?.messages);
-    if (!contents.length) return json({ error: 'messages is required.' }, 400);
+    if (!contents.length) return respond({ error: 'messages is required.' }, 400);
 
     const profile = body?.profile && typeof body.profile === 'object' ? body.profile : {};
     const latest = [...contents].reverse().find(m => m.role === 'user')?.parts?.[0]?.text || '';
@@ -180,6 +191,7 @@ export default {
         : []
     };
 
+    const geminiStarted = performance.now();
     try {
       const response = await geminiGenerate(
         env,
@@ -187,6 +199,7 @@ export default {
         `${SYSTEM_PROMPT}\nتفضيلات المستخدم: ${JSON.stringify(profileContext)}`,
         acute
       );
+      marks.gemini = performance.now() - geminiStarted;
       const parsed = JSON.parse(geminiText(response));
       if (!parsed || typeof parsed.text !== 'string' || !parsed.text.trim()) throw new Error('Invalid AI reply');
       parsed.intensity = Math.max(1, Math.min(10, Number(parsed.intensity || 5)));
@@ -200,9 +213,10 @@ export default {
         parsed.stage = 'safety';
         parsed.expression = 'worried';
       }
-      return json(parsed);
+      return respond(parsed);
     } catch (error) {
-      return json({ error: 'AI service temporarily unavailable.' }, 502);
+      marks.gemini = performance.now() - geminiStarted;
+      return respond({ error: 'AI service temporarily unavailable.' }, 502);
     }
   }
 };
