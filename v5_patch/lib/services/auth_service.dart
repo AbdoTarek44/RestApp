@@ -50,6 +50,9 @@ class AuthService {
     if (FirebaseRuntimeConfig.googleWebClientId.isEmpty) {
       throw StateError('Google sign-in is not configured');
     }
+    // Clear a stale Credential Manager relationship before an explicit login.
+    // Firebase guest identity and local/cloud data are preserved.
+    await GoogleSignIn.instance.signOut();
     final GoogleSignInAccount googleUser = await GoogleSignIn.instance.authenticate();
     final GoogleSignInAuthentication googleAuth = googleUser.authentication;
     final credential = GoogleAuthProvider.credential(idToken: googleAuth.idToken);
