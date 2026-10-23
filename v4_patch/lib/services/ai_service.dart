@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import '../models/chat_message.dart';
 import 'maalish_engine.dart';
 import 'memory_service.dart';
+import 'auth_service.dart';
 
 class AiService {
   static const buildApiUrl = String.fromEnvironment('MAALISH_API_URL', defaultValue: '');
@@ -18,15 +19,21 @@ class AiService {
   }
 
   Future<MaalishReply> reply(List<ChatMessage> messages) async {
+    if (messages.isEmpty) return fallback.reply('');
     final latest = messages.last.text;
     final profile = await memory.load();
     final rawUrl = profile.backendUrl.trim().isNotEmpty ? profile.backendUrl.trim() : buildApiUrl;
     if (rawUrl.isEmpty) return fallback.reply(latest);
 
     try {
+      final endpoint = _chatUri(rawUrl);
+      final trusted = Uri.tryParse(buildApiUrl);
+      if (endpoint.scheme != 'https' || trusted == null ||
+          endpoint.origin != trusted.origin) return fallback.reply(latest);
+      final token = await AuthService().idToken();
       final response = await http.post(
         _chatUri(rawUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
         body: jsonEncode({
           'messages': messages
               .map((m) => {'role': m.fromUser ? 'user' : 'assistant', 'content': m.text})
