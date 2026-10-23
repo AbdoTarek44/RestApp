@@ -9,19 +9,41 @@ class InsightsService {
   final String uid;
   InsightsService() : uid = AuthService().currentUser?.uid ?? 'local';
   static final Map<String,Future<void>> _jobs = {};
+  static final Map<String,Future<void>> _edits = {};
   String get _consent => '$uid:insights_consent_v11';
   String get _dirty => '$uid:insights_consent_dirty_v11';
   String get _outbox => '$uid:insights_outbox_v11';
   bool get _current => uid != 'local' && AuthService().currentUser?.uid == uid;
   Future<bool> enabled() async => (await SharedPreferences.getInstance()).getBool(_consent) ?? false;
-  Future<void> setEnabled(bool enabled) async {
+  Future<void> refreshConsent() async {
+    if(!_current)return;
+    final p=await SharedPreferences.getInstance();if(p.getBool(_dirty)==true)return;
+    final client=http.Client();
+    try{
+      final token=await AuthService().idToken().timeout(const Duration(seconds:4));
+      if(!_current)return;
+      final result=await client.get(Uri.parse(AiService.buildApiUrl).replace(path:'/insights/consent'),
+        headers:{'Authorization':'Bearer $token'}).timeout(const Duration(seconds:4));
+      if(result.statusCode==200&&p.getBool(_dirty)!=true&&_current){
+        final consent=(jsonDecode(result.body) as Map<String,dynamic>)['enabled']==true;
+        await p.setBool(_consent,consent);if(!consent)await p.remove(_outbox);
+      }
+    }catch(_){}finally{client.close();}
+  }
+  Future<void> _edit(Future<void> Function() work) {
+    final previous=_edits[uid] ?? Future<void>.value();
+    final next=previous.catchError((_){}).then((_)=>work());
+    _edits[uid]=next;
+    return next.whenComplete((){if(identical(_edits[uid],next))_edits.remove(uid);});
+  }
+  Future<void> setEnabled(bool enabled) => _edit(() async {
     final p = await SharedPreferences.getInstance();
     await p.setBool(_consent,enabled); await p.setBool(_dirty,true);
     if (!enabled) await p.remove(_outbox);
     unawaited(flush());
-  }
+  });
   Future<void> report({required String runId, required String phase, required String beforeMood,
-    String afterMood = 'skip', List<String> categories = const []}) async {
+    String afterMood = 'skip', List<String> categories = const []}) => _edit(() async {
     if (!_current || !await enabled()) return;
     final p=await SharedPreferences.getInstance();
     final pending=jsonDecode(p.getString(_outbox) ?? '{}') as Map<String,dynamic>;
@@ -33,7 +55,7 @@ class InsightsService {
       'categories':{...prior,...categories}.take(6).toList()};
     await p.setString(_outbox,jsonEncode(pending));
     unawaited(flush());
-  }
+  });
   Future<void> _post(String path,Map<String,dynamic> body) async {
     if (!_current) throw StateError('Account changed');
     final token=await AuthService().idToken().timeout(const Duration(seconds:6));
@@ -62,9 +84,11 @@ class InsightsService {
         for (final entry in snapshot.entries) {
           if(!_current || !await enabled()) return;
           await _post('/insights/session',Map<String,dynamic>.from(entry.value as Map));
-          final latest=jsonDecode(p.getString(_outbox) ?? '{}') as Map<String,dynamic>;
-          if(jsonEncode(latest[entry.key])==jsonEncode(entry.value)) latest.remove(entry.key);
-          await p.setString(_outbox,jsonEncode(latest));
+          await _edit(() async {
+            final latest=jsonDecode(p.getString(_outbox) ?? '{}') as Map<String,dynamic>;
+            if(jsonEncode(latest[entry.key])==jsonEncode(entry.value)) latest.remove(entry.key);
+            await p.setString(_outbox,jsonEncode(latest));
+          });
         }
       } catch (_) { /* Optional events remain local for the next startup/resume. */ }
     });

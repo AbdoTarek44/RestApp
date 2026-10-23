@@ -24,7 +24,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final insights = InsightsService();
   late final String insightRunId;
   String beforeMood = 'skip';
-  bool moodAsked = false;
+  bool moodAsked = false, moodPrompting = false, shareThisRun = false;
   final speech = SpeechService();
   final memory = MemoryService();
   final messages = <ChatMessage>[];
@@ -112,7 +112,8 @@ class _ChatScreenState extends State<ChatScreen> {
     if (moodAsked) return;
     moodAsked = true;
     var selected = 'skip';
-    var consent = await insights.enabled();
+    final previousConsent = await insights.enabled();
+    var consent = previousConsent;
     if (!mounted) return;
     final result = await showModalBottomSheet<String>(context: context, isScrollControlled:true,
       showDragHandle:true, builder:(sheet) => StatefulBuilder(builder:(sheet,update) =>
@@ -135,19 +136,21 @@ class _ChatScreenState extends State<ChatScreen> {
           ]))))));
     beforeMood = result ?? 'skip';
     // Dismissing the sheet never changes consent.
-    if(result != null) await insights.setEnabled(consent);
-    unawaited(insights.report(runId:insightRunId,phase:'start',beforeMood:beforeMood));
+    shareThisRun = result == null ? previousConsent : consent;
+    if(result != null && consent != previousConsent) await insights.setEnabled(consent);
+    if(shareThisRun) unawaited(insights.report(runId:insightRunId,phase:'start',beforeMood:beforeMood));
   }
 
   Future<void> send(String value) async {
     final text = value.trim();
-    if (text.isEmpty || typing || opening || !conversations.current) return;
+    if (text.isEmpty || typing || opening || moodPrompting || !conversations.current) return;
     if (text.length > 5000) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خلّي الرسالة أقل من ٥٠٠٠ حرف وقسّم الكلام على رسايل.')));
       return;
     }
     if (!moodAsked) {
-      await _askMood();
+      moodPrompting = true;
+      try { await _askMood(); } finally { moodPrompting = false; }
       if (!mounted || !conversations.current) return;
     }
     setState(() {
@@ -197,7 +200,7 @@ class _ChatScreenState extends State<ChatScreen> {
       try { await _persist(); }
       catch (_) { if (mounted) setState(() => saveError = 'الرد ظاهر، لكن حفظه تعذّر. اضغط إعادة الحفظ.'); }
       if (mounted) setState(() => typing = false);
-      unawaited(insights.report(runId:insightRunId,phase:'progress',beforeMood:beforeMood,
+      if(shareThisRun) unawaited(insights.report(runId:insightRunId,phase:'progress',beforeMood:beforeMood,
         categories:latestCategories.where((v)=>_topicCodes.contains(v)).toList()));
       unawaited(_remember(r.memoryCandidates));
     } on AiRequestException catch (error) {
@@ -280,7 +283,7 @@ class _ChatScreenState extends State<ChatScreen> {
   static const _topicCodes = {'marriage','family','relatives','parenting','relationship','friends','work','money','study','grief','loneliness','self_confidence','future','decision','health_concern','daily_life','other'};
   Future<void> completeSession(String mood) async {
     final outcome = mood.contains('زي ما') ? 'same' : mood.contains('أخف') ? 'lighter' : mood.contains('أحسن') ? 'better' : mood.contains('تمام') ? 'good' : 'skip';
-    unawaited(insights.report(runId:insightRunId,phase:'finish',beforeMood:beforeMood,afterMood:outcome,
+    if(shareThisRun) unawaited(insights.report(runId:insightRunId,phase:'finish',beforeMood:beforeMood,afterMood:outcome,
       categories:latestCategories.where((v)=>_topicCodes.contains(v)).toList()));
     try { await _persist(mood: mood, closed: true); if (mounted) Navigator.pop(context); }
     catch (_) { if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّر الحفظ. ارجع للمحادثة وحاول تاني.'))); }

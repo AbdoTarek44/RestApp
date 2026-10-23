@@ -150,8 +150,14 @@ export async function handleAdmin(request,env,userStatusChanged) {
         query(env,'','operationsAudit',1000), appSettings(env),
         countDocuments(env,'conversations',{fieldFilter:{field:{fieldPath:'deleted'},op:'EQUAL',value:{booleanValue:false}}}).catch(()=>null),
         countDocuments(env,'messages').catch(()=>null)]);
+      let selectedDaily=daily;
+      if(url.searchParams.has('from')||url.searchParams.has('to')){
+        const from=url.searchParams.get('from'),to=url.searchParams.get('to');
+        if(!/^\d{4}-\d{2}-\d{2}$/.test(from||'')||!/^\d{4}-\d{2}-\d{2}$/.test(to||'')||!Number.isFinite(Date.parse(from))||!Number.isFinite(Date.parse(to))||Date.parse(to)<Date.parse(from)||Date.parse(to)-Date.parse(from)>=90*86400000)return respond({error:'اختار فترة صحيحة لا تزيد عن ٩٠ يومًا.'},400);
+        selectedDaily=daily.filter(v=>v.id>=from&&v.id<=to);
+      }else selectedDaily=daily.sort((a,b)=>a.id.localeCompare(b.id)).slice(-30);
       return respond({totalUsers:Number(count.recordsCount||0),activeToday:activity.length,
-        activeTodayCapped:activity.length===20000,daily:daily.sort((a,b)=>a.id.localeCompare(b.id)).slice(-30),
+        activeTodayCapped:activity.length===20000,daily:selectedDaily.sort((a,b)=>a.id.localeCompare(b.id)),
         totalConversations,totalMessages,
         audit:logs.sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,30),settings,model:env.MAALISH_MODEL||'gemini-3.5-flash-lite'});
     }

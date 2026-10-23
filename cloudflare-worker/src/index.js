@@ -246,11 +246,14 @@ export default {
 
     const geminiStarted = performance.now();
     try {
+      // The complete short conversation is already in contents. Defer the
+      // rolling summary until it is needed, without changing safety metadata.
+      const compact=body.compactContext===true&&contents.length<=10&&!profileContext.conversationSummary;
       const response = await geminiGenerate(
         env,
         contents,
-        `${SYSTEM_PROMPT}\nتفضيلات المستخدم: ${JSON.stringify(profileContext)}`,
-        acute, config
+        `${SYSTEM_PROMPT}\nتفضيلات المستخدم: ${JSON.stringify(profileContext)}${compact?'\nللطلب الحالي فقط: المحادثة كاملة قصيرة، لذا conversationSummary يجب أن يكون نصًا فارغًا. memoryCandidates بحد أقصى معلومة واحدة. حافظ على كل حقول الأمان والتصنيف والرد الطبيعي.':''}`,
+        acute, compact?{...config,maxOutputTokens:Math.min(config.maxOutputTokens,700)}:config
       );
       usage = response.usageMetadata || {};
       marks.gemini = performance.now() - geminiStarted;

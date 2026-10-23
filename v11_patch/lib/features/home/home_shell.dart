@@ -20,12 +20,12 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int current = 0;
   String announcement = '';
   @override
-  void initState() { super.initState(); WidgetsBinding.instance.addObserver(this); _notice(); ConversationService().retryPending(); InsightsService().flush(); NotificationService.refresh(); }
+  void initState() { super.initState(); WidgetsBinding.instance.addObserver(this); _notice(); ConversationService().retryPending(); InsightsService().refreshConsent(); InsightsService().flush(); NotificationService.refresh(); }
   @override
   void dispose() { WidgetsBinding.instance.removeObserver(this); super.dispose(); }
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) { _notice(); ConversationService().retryPending(); InsightsService().flush(); NotificationService.refresh(); }
+    if (state == AppLifecycleState.resumed) { _notice(); ConversationService().retryPending(); InsightsService().refreshConsent(); InsightsService().flush(); NotificationService.refresh(); }
   }
   Future<void> _notice() async {
     try {

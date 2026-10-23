@@ -14,4 +14,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: node --test cloudflare-worker/test/worker.test.js
+      - run: node --test cloudflare-worker/test/*.test.js

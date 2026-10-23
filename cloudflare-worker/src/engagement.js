@@ -42,9 +42,15 @@ async function purgeInsights(env,uid){
   for(const row of rows)await remove(env,'sessionInsights/'+row.id);}
 }
 export async function handleEngagement(request,env){
- if(request.method!=='POST')return response({error:'Not found'},404);
+ const requestPath=new URL(request.url).pathname;
+ if(request.method!=='POST'&&!(request.method==='GET'&&requestPath==='/insights/consent'))return response({error:'Not found'},404);
  let identity;
  try{identity=await verifyFirebaseToken(request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1],env.FIREBASE_PROJECT_ID);}catch{return response({error:'Authentication required'},401);}
+ if(request.method==='GET'){
+  try{if(!await accountAllowed(env,identity))return response({error:'Account disabled'},403);
+   return response({enabled:decode(await get(env,`users/${identity.sub}/preferences/insights`)).enabled===true});}
+  catch{return response({error:'Consent unavailable'},503);}
+ }
  let data;try{data=await body(request);}catch{return response({error:'Invalid request'},400);}
  const path=new URL(request.url).pathname,uid=identity.sub;
  try{
@@ -114,7 +120,7 @@ function range(url){
  const start=url.searchParams.get('from')||new Date(Date.now()-29*86400000).toISOString().slice(0,10),end=url.searchParams.get('to')||new Date().toISOString().slice(0,10);
  if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||!/^\d{4}-\d{2}-\d{2}$/.test(end))throw new Error('Invalid range');
  const from=Date.parse(start+'T00:00:00Z'),until=Date.parse(end+'T00:00:00Z')+86400000;
- if(!Number.isFinite(from)||!Number.isFinite(until)||until<=from||until-from>91*86400000)throw new Error('Invalid range');return {from,until,start,end};
+ if(!Number.isFinite(from)||!Number.isFinite(until)||until<=from||until-from>90*86400000)throw new Error('Invalid range');return {from,until,start,end};
 }
 async function audit(env,identity,action,target){await put(env,'operationsAudit/'+crypto.randomUUID(),{admin:identity.email,action,target,at:new Date().toISOString()});}
 function validateCampaign(data){
