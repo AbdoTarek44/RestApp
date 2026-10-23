@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'auth_service.dart';
@@ -42,7 +43,7 @@ class NotificationService {
     try{
       final result=await client.post(Uri.parse(AiService.buildApiUrl).replace(path:'/push/register'),
         headers:{'Content-Type':'application/json','Authorization':'Bearer $token'},
-        body:jsonEncode({'registration':registration,'enabled':value})).timeout(const Duration(seconds:10));
+        body:jsonEncode({'registration':registration,'enabled':value,'offsetMinutes':DateTime.now().timeZoneOffset.inMinutes})).timeout(const Duration(seconds:10));
       if(result.statusCode!=200)throw StateError('تسجيل الإشعارات لسه ما اكتملش. جرّب تاني مع اتصال بالإنترنت.');
     }finally{client.close();}
   }
@@ -93,6 +94,36 @@ class NotificationService {
       }catch(_) { /* Registration retries on foreground/resume; never blocks chat. */ }
     });
     return _queue;
+  }
+  static Future<void> offerOnce(BuildContext context) async {
+    final prefs=await SharedPreferences.getInstance();
+    if(prefs.getBool('push_onboarding_seen_v11')==true || !context.mounted)return;
+    await prefs.setBool('push_onboarding_seen_v11',true);
+    if(!context.mounted)return;
+    final allow=await showDialog<bool>(context:context,builder:(dialog)=>Directionality(
+      textDirection:TextDirection.rtl,child:AlertDialog(title:const Text('نطمن عليك من وقت للتاني؟'),
+      content:const Text('اسمح بإشعارات معلش عشان توصلك رسالة عامة، مرة يوميًا بالكتير قريب من وقت فضفضتك المعتاد بالليل، ورسائل الإدارة في أي وقت. بنستخدم ساعة الاستخدام فقط لتوقيت التذكير، من غير محتوى كلامك. تقدر توقفها من الإعدادات.'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(dialog,false),child:const Text('مش دلوقتي')),
+        FilledButton(onPressed:()=>Navigator.pop(dialog,true),child:const Text('اسمح بالإشعارات'))])));
+    if(allow!=true)return;
+    try{await setEnabled(true);}catch(_){if(context.mounted)ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('تقدر تكمّل ضبط الإشعارات من «أنا ومعلش».')));}
+  }
+  static Future<void> recordActivity() async {
+    try{
+      if(!await enabled())return;
+      final uid=_uid;if(uid==null)return;
+      final now=DateTime.now(),prefs=await SharedPreferences.getInstance();
+      final bucket=now.toIso8601String().substring(0,13);
+      if(prefs.getString('$uid:push_activity_hour')==bucket)return;
+      final token=await AuthService().idToken().timeout(const Duration(seconds:6));
+      if(_uid!=uid || !await enabled())return;
+      final client=http.Client();
+      try{final result=await client.post(Uri.parse(AiService.buildApiUrl).replace(path:'/push/activity'),
+        headers:{'Content-Type':'application/json','Authorization':'Bearer $token'},
+        body:jsonEncode({'hour':now.hour,'offsetMinutes':now.timeZoneOffset.inMinutes})).timeout(const Duration(seconds:8));
+        if(result.statusCode==200)await prefs.setString('$uid:push_activity_hour',bucket);
+      }finally{client.close();}
+    }catch(_){ /* Optional timing never delays the reply. */ }
   }
   static Future<void> openSettings()=>_native.invokeMethod<void>('settings');
 }

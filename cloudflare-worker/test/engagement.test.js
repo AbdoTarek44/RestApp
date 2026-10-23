@@ -111,3 +111,41 @@ test('disabling and deleting an account removes subscriptions and only its insig
  await setUserPushStatus(env,'user1',false);assert.ok(subscriptions.filter(v=>v.method==='POST').length>=2);
  await deleteEngagementData(env,'user1');assert.equal([...store.keys()].some(k=>k.startsWith('notificationDevices/')||k.startsWith('sessionInsights/')),false);
 });
+import {reminderDue,runReminders} from '../src/engagement.js';
+test('reminders respect evening timezone, recent use and stale accounts',()=>{
+ const now=Date.parse('2026-10-23T18:00:00Z'),d={updatedAt:now-86400000,offsetMinutes:120};
+ assert.equal(reminderDue({},d,now),true);
+ assert.equal(reminderDue({lastActiveAt:now-1000},d,now),false);
+ assert.equal(reminderDue({hour:21},d,now),false);
+ assert.equal(reminderDue({lastActiveAt:now-31*86400000},d,now),false);
+ assert.equal(reminderDue({hour:3,offsetMinutes:540},d,now),false);
+});
+test('activity requires push opt-in and stores coarse timing without private text',async()=>{
+ assert.equal((await user('/push/activity',{hour:21,offsetMinutes:180})).status,403);
+ await user('/push/register',{registration,enabled:true,offsetMinutes:180});
+ assert.equal((await user('/push/activity',{hour:21,offsetMinutes:180,text:'private'})).status,400);
+ assert.equal((await user('/push/activity',{hour:21,offsetMinutes:180})).status,200);
+ const timing=store.get('users/user1/preferences/reminderTiming');assert.equal(timing.fields.hour.integerValue,'21');
+ assert.equal((await user('/push/activity',{hour:21,offsetMinutes:180})).status,200);
+ assert.equal(JSON.parse(store.get('users/user1/preferences/reminderTiming').fields.bins.stringValue)['21'],1);
+});
+test('scheduled reminders dry-run never sends, atomic claim caps daily and opt-out blocks',async()=>{
+ const now=Date.parse('2026-10-23T18:00:00Z');
+ await user('/push/register',{registration,enabled:true,offsetMinutes:120});
+ const key=[...store.keys()].find(k=>k.startsWith('notificationDevices/'));
+ seed(key,{ownerId:'user1',registration,enabled:true,suspended:false,offsetMinutes:120,updatedAt:now-86400000});
+ assert.equal((await runReminders(env,now,true)).due,1);assert.equal(sends.length,0);
+ assert.equal((await runReminders(env,now)).accepted,1);assert.equal(sends.length,1);
+ await runReminders(env,now);assert.equal(sends.length,1);
+ await runReminders(env,now+23*3600000);assert.equal(sends.length,1);
+ seed('operationsUsers/user1',{disabled:true});await runReminders(env,now+86400000);assert.equal(sends.length,1);
+ seed('operationsUsers/user1',{disabled:false});await user('/push/register',{registration,enabled:false});
+ await runReminders(env,now+86400000);assert.equal(sends.length,1);
+});
+test('uncertain scheduled reminder is not resent after timeout',async()=>{
+ const now=Date.parse('2026-10-23T18:00:00Z');await user('/push/register',{registration,enabled:true,offsetMinutes:120});
+ const key=[...store.keys()].find(k=>k.startsWith('notificationDevices/'));
+ seed(key,{ownerId:'user1',registration,enabled:true,suspended:false,offsetMinutes:120,updatedAt:now-86400000});
+ failSend=true;assert.equal((await runReminders(env,now)).failed,1);failSend=false;
+ assert.equal((await runReminders(env,now)).accepted,0);assert.equal(sends.length,0);
+});

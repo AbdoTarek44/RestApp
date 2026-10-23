@@ -20,7 +20,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int current = 0;
   String announcement = '';
   @override
-  void initState() { super.initState(); WidgetsBinding.instance.addObserver(this); _notice(); ConversationService().retryPending(); InsightsService().refreshConsent(); InsightsService().flush(); NotificationService.refresh(); }
+  void initState() { super.initState(); WidgetsBinding.instance.addObserver(this); _notice(); ConversationService().retryPending(); InsightsService().refreshConsent(); InsightsService().flush(); NotificationService.refresh(); WidgetsBinding.instance.addPostFrameCallback((_) { if(mounted) NotificationService.offerOnce(context); }); }
   @override
   void dispose() { WidgetsBinding.instance.removeObserver(this); super.dispose(); }
   @override

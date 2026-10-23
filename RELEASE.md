@@ -1,4 +1,49 @@
-# Maalish V10 release candidate
+# Maalish V11 pre-final release
+
+V10 full transcripts, restart/resumption, editable memory and owner erasure remain
+available. The user confirmed the V10 application works. V11 adds the following:
+
+- Opt-in Android push via Firebase Messaging 17.0.1, with an explicit permission
+  request, a native high-priority channel, foreground display and private
+  lockscreen visibility. Refresh/auth-change/logout/account-erasure handling
+  manages device registration. SDK auto-init starts disabled.
+- Protected admin notification composer: all opted-in devices through a general
+  topic, or the registered devices of one UID. Preview is mandatory; confirmation
+  atomically claims a campaign, so a repeated request never resends it. Unknown
+  send results are not retried automatically. Google acceptance is not proof of
+  receipt or reading. No actual user notifications were sent by the agent.
+- Optional session surveys with explicit opt-in to aggregate insights. Before
+  mood is self-reported; after choices distinguish same/lighter/better/good/skip.
+  A separate per-view run starts only when a message is sent, not on history reads.
+  User text is saved before showing the survey; pending background replies are
+  also saved after leaving the chat screen.
+- Server insights accept only fixed category/mood codes. No message text or
+  personal conversation title enters this dataset. Account-scoped records allow
+  consent revocation/account erasure; the admin API returns only aggregates.
+  An atomic consent-version check prevents late writes after revocation.
+- Redesigned RTL dashboard with period filters (up to 90 days), topic/mood
+  rankings, unique-account counts, before/after matrix, positive end-rating
+  denominator, unrated/unfinished counts and aggregate-only CSV. Only consenting
+  participation is represented; the capped 10,000-session result is flagged.
+- Short conversations defer unnecessary rolling summaries. Existing summaries
+  and longer-context behavior remain active. A three-case provider comparison
+  measured 1.01–1.29s compact versus 3.41–8.32s baseline, with fewer output tokens.
+  This is a small, variable provider sample, not a phone-latency guarantee.
+
+FCM HTTP v1 validation-only request succeeded with the operations service account.
+Its custom role gained only message create and topic subscription create/delete.
+Actual receipt on a physical phone still needs confirmation after installation,
+permission grant and an explicitly confirmed test to that user's account.
+
+Seventeen backend tests cover authorization, fixed vocabularies, consent races,
+idempotent session completion, notification preview/claim/replay, unknown results,
+secret redaction and compact-context safety. Live consent/erasure/aggregation
+checks passed using cleaned synthetic accounts. Native Android build and the four
+existing Flutter persistence tests pass; final artifact details are in delivery
+notes. Local visual QA used clearly marked synthetic fixtures, never production
+user content, and never called the real notification send endpoint.
+
+The following integration details describe the shared V10 foundation.
 
 Firebase project `maalish-8cd54`; Enterprise native Firestore database `maalish`,
 Frankfurt `europe-west3`. Google and anonymous sign-in are enabled. The separate
@@ -78,3 +123,7 @@ Store publication still requires a protected release key, Play App Signing SHA
 registration, production AAB, listing and privacy/data-safety review. No Play
 publication is performed. Rules remain a prototype and need independent review
 before broad distribution. Keep the existing PR draft until device feedback.
+
+## V11.1 notification timing
+
+Ask once on first authenticated home launch (including a first upgrade to this feature); OS permission follows explicit acceptance. Settings retain opt-out. Optional coarse chat-use hours and UTC offset inform an evening reminder (18:00–23:00 local), default 20:00. Skip activity in the preceding two hours and accounts inactive for thirty days. Atomic per-account claims enforce at most one automatic reminder per rolling 24 hours, including uncertain deliveries. Admin confirmed campaigns can be sent at any time and remain independent of this cap. No chat contents are stored for timing. Hourly UTC Cloudflare Cron handles scheduling, no device background service required. Both types respect notification opt-out. Physical notification receipt remains pending user testing.

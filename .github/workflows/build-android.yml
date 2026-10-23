@@ -43,7 +43,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           p = Path('app/pubspec.yaml')
-          s = p.read_text().replace('version: 0.2.0+2','version: 0.11.0+11')
+          s = p.read_text().replace('version: 0.2.0+2','version: 0.11.1+12')
           if 'firebase_core:' not in s:
               s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.1.0\n  firebase_auth: ^7.0.1\n  google_sign_in: ^7.2.0\n  cloud_firestore: ^7.1.0\n  firebase_crashlytics: ^6.0.0\n  firebase_messaging: ^17.0.1')
           if 'flutter_test:' not in s:
@@ -93,16 +93,16 @@ jobs:
       - name: Report actual APK signing certificate
         run: |
           apk_signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
-          "$apk_signer" verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk | tee Maalish-v11-signing.txt
+          "$apk_signer" verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk | tee Maalish-v11.1-signing.txt
 
       - name: Collect APK
-        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v11-preview.apk
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v11.1-preview.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maalish-v11-Preview-APK
+          name: Maalish-v11.1-Preview-APK
           path: |
-            Maalish-v11-preview.apk
-            Maalish-v11-signing.txt
+            Maalish-v11.1-preview.apk
+            Maalish-v11.1-signing.txt
           if-no-files-found: error

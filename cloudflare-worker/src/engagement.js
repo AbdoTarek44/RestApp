@@ -13,8 +13,8 @@ function decode(doc){const result=unpack(doc);for(const[k,v]of Object.entries(do
 async function get(env,path){return googleRequest(env,base(env)+'/'+path);}
 async function put(env,path,value){return googleRequest(env,base(env)+'/'+path,'PATCH',{fields:fields(value)});}
 async function remove(env,path){return googleRequest(env,base(env)+'/'+path,'DELETE');}
-async function query(env,collection,where,limit=1000){const rows=await googleRequest(env,base(env)+':runQuery','POST',{
-  structuredQuery:{from:[{collectionId:collection}],...(where?{where}:{}),limit}});
+async function query(env,collection,where,limit=1000,orderField){const rows=await googleRequest(env,base(env)+':runQuery','POST',{
+  structuredQuery:{from:[{collectionId:collection}],...(where?{where}:{}),limit,...(orderField?{orderBy:[{field:{fieldPath:orderField},direction:'DESCENDING'}]}:{})}});
   return (rows||[]).filter(v=>v.document).map(v=>({id:v.document.name.split('/').pop(),raw:v.document,...decode(v.document)}));}
 const eq=(field,value)=>({fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:f(value)}});
 async function body(request){if(Number(request.headers.get('content-length'))>8192)throw new Error('Request too large');const text=await request.text();if(new TextEncoder().encode(text).length>8192)throw new Error('Request too large');return JSON.parse(text);}
@@ -23,7 +23,8 @@ function validKeys(data,keys){return data&&typeof data==='object'&&!Array.isArra
 
 async function subscribe(env,registration,enabled){
  const url=`https://fcm.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/registrations/${encodeURIComponent(registration)}/topicSubscriptions`;
- try{return await googleRequest(env,url+(enabled?'?topic_name='+TOPIC:'/'+TOPIC+'?allowMissing=true'),enabled?'POST':'DELETE',enabled?{}:undefined);}
+ try{const result=await googleRequest(env,url+(enabled?'?topic_name='+TOPIC:'/'+TOPIC+'?allowMissing=true'),enabled?'POST':'DELETE',enabled?{}:undefined);
+  if(enabled&&!result)throw new Error('Registration unavailable (404)');return result;}
  catch(error){if(enabled&&error.message.includes('(409)'))return {};throw error;}
 }
 async function registrationId(token){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token));return [...new Uint8Array(bytes)].map(v=>v.toString(16).padStart(2,'0')).join('');}
@@ -36,6 +37,7 @@ export async function deleteEngagementData(env,uid){
  const rows=await devices(env,uid);
  for(const d of rows){await subscribe(env,d.registration,false);await remove(env,'notificationDevices/'+d.id);}
  await purgeInsights(env,uid);
+ await remove(env,`users/${uid}/preferences/reminderTiming`);await remove(env,`users/${uid}/preferences/reminderDelivery`);
 }
 async function purgeInsights(env,uid){
  while(true){const rows=await query(env,'sessionInsights',eq('ownerId',uid),100);if(!rows.length)break;
@@ -58,7 +60,8 @@ export async function handleEngagement(request,env){
   if(!allowed&&!(path==='/push/register'&&data.enabled===false))return response({error:'Account disabled'},403);
   const limited=await env.CHAT_RATE_LIMITER.limit({key:uid+':engagement'});if(!limited.success)return response({error:'Too many requests'},429);
   if(path==='/push/register'){
-   if(!validKeys(data,['registration','enabled'])||typeof data.registration!=='string'||data.registration.length<20||data.registration.length>4096||typeof data.enabled!=='boolean')return response({error:'Invalid registration'},400);
+   if(!validKeys(data,['registration','enabled','offsetMinutes'])||typeof data.registration!=='string'||data.registration.length<20||data.registration.length>4096||typeof data.enabled!=='boolean')return response({error:'Invalid registration'},400);
+   if(data.offsetMinutes!==undefined&&(!Number.isInteger(data.offsetMinutes)||Math.abs(data.offsetMinutes)>840))return response({error:'Invalid timezone'},400);
    const id=await registrationId(data.registration);
    const existing=await get(env,'notificationDevices/'+id);
    if(!data.enabled){
@@ -68,8 +71,20 @@ export async function handleEngagement(request,env){
    }
    const own=await devices(env,uid);if(!own.some(v=>v.id===id)&&own.length>=10)return response({error:'Device limit reached'},409);
    await subscribe(env,data.registration,true);
-   await put(env,'notificationDevices/'+id,{ownerId:uid,registration:data.registration,enabled:true,suspended:false,updatedAt:Date.now()});
+   await put(env,'notificationDevices/'+id,{ownerId:uid,registration:data.registration,enabled:true,suspended:false,updatedAt:Date.now(),offsetMinutes:data.offsetMinutes??0});
    return response({ok:true,enabled:true});
+  }
+  if(path==='/push/activity'){
+   if(!validKeys(data,['hour','offsetMinutes'])||!Number.isInteger(data.hour)||data.hour<0||data.hour>23||!Number.isInteger(data.offsetMinutes)||Math.abs(data.offsetMinutes)>840)return response({error:'Invalid timing'},400);
+   if(!(await devices(env,uid)).some(d=>d.enabled&&!d.suspended))return response({error:'Opt-in required'},403);
+   const path=`users/${uid}/preferences/reminderTiming`,old=decode(await get(env,path)),now=Date.now();
+   let bins;try{bins=JSON.parse(old.bins||'{}');}catch{bins={};}
+   const day=new Date(now+data.offsetMinutes*60000).toISOString().slice(0,10);
+   // At most one sample per hour/day; only evening hours inform reminders.
+   if(data.hour>=18&&data.hour<=23&&old.sampleBucket!==day+'_'+data.hour){bins[data.hour]=Math.min(30,(bins[data.hour]||0)+1);}
+   const preferred=Object.keys(bins).sort((a,b)=>bins[b]-bins[a]||Number(a)-Number(b))[0];
+   await put(env,path,{bins:JSON.stringify(bins),hour:preferred===undefined?20:Number(preferred),offsetMinutes:data.offsetMinutes,lastActiveAt:now,sampleBucket:day+'_'+data.hour});
+   return response({ok:true});
   }
   if(path==='/insights/consent'){
    if(!validKeys(data,['enabled'])||typeof data.enabled!=='boolean')return response({error:'Invalid consent'},400);
@@ -145,8 +160,8 @@ export async function adminEngagement(request,env,identity){
    return response({...aggregateInsights(rows),from:selected.start,to:selected.end,capped:rows.length===10000,limit:10000});
   }
   if(path==='/api/admin/notifications'&&request.method==='GET'){
-   const [campaigns,registered]=await Promise.all([query(env,'operationsCampaigns',null,1000),devices(env)]);
-   return response({devices:registered.filter(v=>v.enabled&&!v.suspended).length,
+   const [campaigns,registered]=await Promise.all([query(env,'operationsCampaigns',null,30,'createdAt'),devices(env)]);
+   return response({devices:registered.filter(v=>v.enabled&&!v.suspended).length,devicesCapped:registered.length===10000,
     campaigns:campaigns.sort((a,b)=>b.createdAt-a.createdAt).slice(0,30).map(c=>({id:c.id,title:c.title,body:c.body,target:c.target,uid:c.uid,status:c.status,createdAt:c.createdAt,accepted:c.accepted||0,failed:c.failed||0,unknown:c.unknown||0,registeredDevices:c.registeredDevices||0}))});
   }
   if(request.method==='POST'){
@@ -183,4 +198,35 @@ export async function adminEngagement(request,env,identity){
   }
   return response({error:'Not found'},404);
  }catch{return response({error:'تعذّر تحميل أو حفظ البيانات. جرّب تاني.'},503);}
+}
+
+// Timing uses only coarse hours, never messages or mood records.
+export function reminderDue(timing,device,now){
+ const offset=timing.offsetMinutes??device.offsetMinutes??0;
+ const local=new Date(now+offset*60000),hour=timing.hour??20;
+ return local.getUTCHours()===hour && hour>=18 && hour<=23 &&
+   now-(timing.lastActiveAt??device.updatedAt)<30*86400000 &&
+   now-(timing.lastActiveAt??device.updatedAt)>2*3600000;
+}
+export async function runReminders(env,now=Date.now(),dryRun=false){
+ const rows=(await devices(env)).filter(d=>d.enabled&&!d.suspended),seen=new Set();
+ let due=0,accepted=0,failed=0;
+ for(const d of rows){
+  if(seen.has(d.ownerId))continue;seen.add(d.ownerId);
+  const timing=decode(await get(env,`users/${d.ownerId}/preferences/reminderTiming`));
+  if(!reminderDue(timing,d,now)||!await accountAllowed(env,{sub:d.ownerId}))continue;
+  const claimPath=`users/${d.ownerId}/preferences/reminderDelivery`,old=await get(env,claimPath),previous=decode(old);
+  // A rolling 24-hour cap also protects across timezone changes and cron retries.
+  if(previous.claimedAt&&now-previous.claimedAt<86400000)continue;
+  due++;if(dryRun)continue;
+  try{await googleRequest(env,base(env)+':commit','POST',{writes:[{update:{name:name(env,claimPath),fields:fields({claimedAt:now,status:'claimed'})},currentDocument:old?{updateTime:old.updateTime}:{exists:false}}]});}
+  catch(error){if(error.message.includes('(409)')||error.message.includes('(412)'))continue;throw error;}
+  // Check current opt-in after claiming; claims are never automatically retried.
+  const current=decode(await get(env,'notificationDevices/'+d.id));
+  if(!current.enabled||current.suspended||!await accountAllowed(env,{sub:d.ownerId}))continue;
+  try{await sendFcm(env,{message:fcmMessage({id:'reminder-'+now,title:'معلش',body:'لو حابب تحكي، فيه وقت صغير ليك هنا. خد راحتك 💙'},current.registration)});accepted++;
+    await put(env,claimPath,{claimedAt:now,status:'accepted'});
+  }catch{failed++;await put(env,claimPath,{claimedAt:now,status:'unknown'});}
+ }
+ return {due,accepted,failed,dryRun,capped:rows.length===10000};
 }

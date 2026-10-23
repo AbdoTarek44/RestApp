@@ -6,6 +6,7 @@ import '../../models/conversation.dart';
 import '../../services/conversation_service.dart';
 import '../../services/ai_service.dart';
 import '../../services/insights_service.dart';
+import '../../services/notification_service.dart';
 import '../../services/memory_service.dart';
 import '../../services/speech_service.dart';
 import '../../widgets/maalish_face.dart';
@@ -154,6 +155,7 @@ class _ChatScreenState extends State<ChatScreen> {
       typing = true;
     });
 
+    unawaited(NotificationService.recordActivity());
     _scrollToEnd();
     try { await _persist(); }
     catch (_) {

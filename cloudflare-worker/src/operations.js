@@ -68,11 +68,12 @@ export async function appSettings(env) {
 export async function accountAllowed(env,identity) {
   if (!env.GOOGLE_OPERATIONS_CREDENTIALS) return true;
   const doc = await googleRequest(env,db(env)+'/operationsUsers/'+encodeURIComponent(identity.sub));
-  return unpack(doc).disabled!==true;
+  const value=unpack(doc);
+  return value.disabled!==true && value.deleting!==true;
 }
-async function query(env,parent,collection,limit=100) {
+async function query(env,parent,collection,limit=100,orderField) {
   const data = await googleRequest(env,db(env)+(parent?'/'+parent:'')+':runQuery','POST',{
-    structuredQuery:{from:[{collectionId:collection}],limit}});
+    structuredQuery:{from:[{collectionId:collection}],limit,...(orderField?{orderBy:[{field:{fieldPath:orderField},direction:'DESCENDING'}]}:{})}});
   return (data||[]).filter(v=>v.document).map(v=>({id:v.document.name.split('/').pop(),...unpack(v.document)}));
 }
 async function countDocuments(env,collection,where) {
@@ -147,7 +148,7 @@ export async function handleAdmin(request,env,userStatusChanged) {
         googleRequest(env,`https://identitytoolkit.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}:queryAccounts`,'POST',{returnUserInfo:false}),
         query(env,'','operationsDaily',1000),
         query(env,'operationsActivity/'+new Date().toISOString().slice(0,10),'users',20000),
-        query(env,'','operationsAudit',1000), appSettings(env),
+        query(env,'','operationsAudit',30,'at'), appSettings(env),
         countDocuments(env,'conversations',{fieldFilter:{field:{fieldPath:'deleted'},op:'EQUAL',value:{booleanValue:false}}}).catch(()=>null),
         countDocuments(env,'messages').catch(()=>null)]);
       let selectedDaily=daily;

@@ -1,4 +1,4 @@
-import {handleEngagement,adminEngagement,deleteEngagementData,setUserPushStatus} from './engagement.js';
+import {runReminders,handleEngagement,adminEngagement,deleteEngagementData,setUserPushStatus} from './engagement.js';
 import { verifyFirebaseToken } from './auth.js';
 import { handleAdmin, appSettings, accountAllowed, trackRequest, deleteOwnAccount, requireAdmin } from './operations.js';
 import { adminHtml, adminApp, privacyHtml, deletionHtml } from './admin-assets.js';
@@ -128,6 +128,7 @@ function geminiText(response) {
 }
 
 export default {
+  async scheduled(controller,env){return runReminders(env,controller.scheduledTime);},
   async fetch(request, env, ctx) {
     const started = performance.now();
     let identity, usage = {};

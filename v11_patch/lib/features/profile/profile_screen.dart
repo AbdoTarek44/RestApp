@@ -216,7 +216,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ElevatedButton(onPressed: _save, child: const Text('احفظ الإعدادات')),
           const Divider(height: 30),
           SwitchListTile(value: pushEnabled, title: const Text('إشعارات معلش'),
-            subtitle: Text(pushBusy ? 'جاري تسجيل اختيارك…' : 'رسائل عامة وتحديثات. تقدر توقفها في أي وقت.'),
+            subtitle: Text(pushBusy ? 'جاري تسجيل اختيارك…' : 'تذكير عام يومي بالكتير قريب من ميعادك بالليل، ورسائل الإدارة في أي وقت. بنستخدم ساعة الاستخدام فقط. تقدر توقفها هنا.'),
             onChanged: pushBusy ? null : (value) async {
               setState(()=>pushBusy=true);
               try { await NotificationService.setEnabled(value); }

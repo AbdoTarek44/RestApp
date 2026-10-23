@@ -12,3 +12,6 @@ FIREBASE_WEB_API_KEY = "AIzaSyCW2rBNFrS9qUJf9qa4dhuwYe6kGVPhuW8"
 name = "CHAT_RATE_LIMITER"
 namespace_id = "1001"
 simple = { limit = 15, period = 60 }
+
+[triggers]
+crons = ["0 * * * *"]
