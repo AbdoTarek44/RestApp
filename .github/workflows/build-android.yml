@@ -3,7 +3,12 @@ name: Build Maalish Android APK
 on:
   push:
     branches: [master]
+  pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: maalish-android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -32,22 +37,17 @@ jobs:
           node --check backend/server.js
           node --check cloudflare-worker/src/index.js
 
-      - name: Rebuild Maalish base and apply V6 patches
+      - name: Rebuild Maalish base and apply V12 release-candidate patches
         run: |
-          cat build_src_v2_small/part_*.b64 | base64 -d > maalish_source_v2.zip
-          rm -rf unpacked app
-          mkdir -p unpacked
-          unzip -o maalish_source_v2.zip -d unpacked || true
-          cp -R unpacked/maalish_app app
-          cp -R v3_patch/lib/* app/lib/
-          cp -R v4_patch/lib/* app/lib/
-          cp -R v5_patch/lib/* app/lib/
+          python scripts/reconstruct.py
           python - <<'PY'
           from pathlib import Path
           p = Path('app/pubspec.yaml')
-          s = p.read_text().replace('version: 0.2.0+2','version: 0.6.0+6')
+          s = p.read_text().replace('version: 0.2.0+2','version: 0.12.0+13')
           if 'firebase_core:' not in s:
-              s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.0.0\n  firebase_auth: ^7.0.0\n  google_sign_in: ^7.2.0')
+              s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.1.0\n  firebase_auth: ^7.0.1\n  google_sign_in: ^7.2.0\n  cloud_firestore: ^7.1.0\n  firebase_crashlytics: ^6.0.0\n  firebase_messaging: ^17.0.1')
+          if 'flutter_test:' not in s:
+              s += '\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n  flutter_lints: ^6.0.0\n'
           p.write_text(s)
           PY
 
@@ -56,43 +56,54 @@ jobs:
         run: |
           flutter create . --platforms=android --project-name maalish_app --org com.maalish.app
           rm -rf test
-          python - <<'PY'
-          from pathlib import Path
-          manifest = Path('android/app/src/main/AndroidManifest.xml')
-          s = manifest.read_text()
-          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          perms = marker + '\n    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.INTERNET" />'
-          if 'android.permission.RECORD_AUDIO' not in s:
-              s = s.replace(marker, perms)
-          manifest.write_text(s)
-
-          gradle = Path('android/app/build.gradle.kts')
-          g = gradle.read_text().replace('minSdk = flutter.minSdkVersion', 'minSdk = 24')
-          gradle.write_text(g)
-          PY
+          python ../scripts/configure_preview.py
+          python ../scripts/configure_notifications.py
+          python ../scripts/configure_branding.py
 
       - name: Get dependencies
         working-directory: app
         run: flutter pub get
 
+      - name: Analyze Flutter sources
+        working-directory: app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Test conversation persistence and resumption
+        working-directory: app
+        run: |
+          mkdir -p test
+          cp ../tests/*.dart test/
+          flutter test
+
+      - name: Restore preview development signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.maalish-preview-signing/debug.keystore
+          key: maalish-preview-development-signing-v1
+
       - name: Build release APK
         working-directory: app
-        run: >-
-          flutter build apk --release
-          --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}
-          --dart-define=FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
-          --dart-define=FIREBASE_MESSAGING_SENDER_ID=${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          --dart-define=FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
-          --dart-define=FIREBASE_STORAGE_BUCKET=${{ secrets.FIREBASE_STORAGE_BUCKET }}
-          --dart-define=GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID }}
-          --dart-define=MAALISH_API_URL=${{ secrets.MAALISH_API_URL }}
+        run: |
+          mkdir -p "$HOME/.maalish-preview-signing"
+          export MAALISH_SIGNING_STORE="$HOME/.maalish-preview-signing/debug.keystore"
+          if [ ! -f "$MAALISH_SIGNING_STORE" ]; then
+            keytool -genkeypair -keystore "$MAALISH_SIGNING_STORE" -storepass android -keypass android -alias androiddebugkey -dname "CN=Maalish Preview Development,O=Maalish,C=EG" -keyalg RSA -validity 10000
+          fi
+          flutter build apk --release --dart-define-from-file=../config/firebase.preview.android.json
+
+      - name: Report actual APK signing certificate
+        run: |
+          apk_signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          "$apk_signer" verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk | tee Maalish-v12-signing.txt
 
       - name: Collect APK
-        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v6-release.apk
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v12-preview.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maalish-v6-APK
-          path: Maalish-v6-release.apk
+          name: Maalish-v12-Preview-APK
+          path: |
+            Maalish-v12-preview.apk
+            Maalish-v12-signing.txt
           if-no-files-found: error

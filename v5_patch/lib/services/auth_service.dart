@@ -47,44 +47,37 @@ class AuthService {
 
   Future<UserCredential> signInWithGoogle() async {
     if (!ready) throw StateError('Firebase is not configured');
+    if (FirebaseRuntimeConfig.googleWebClientId.isEmpty) {
+      throw StateError('Google sign-in is not configured');
+    }
+    // Clear a stale Credential Manager relationship before an explicit login.
+    // Firebase guest identity and local/cloud data are preserved.
+    await GoogleSignIn.instance.signOut();
     final GoogleSignInAccount googleUser = await GoogleSignIn.instance.authenticate();
     final GoogleSignInAuthentication googleAuth = googleUser.authentication;
     final credential = GoogleAuthProvider.credential(idToken: googleAuth.idToken);
-    return FirebaseAuth.instance.signInWithCredential(credential);
-  }
-
-  Future<void> sendPhoneCode({
-    required String phoneNumber,
-    required void Function(String verificationId) onCodeSent,
-    required void Function(String message) onError,
-  }) async {
-    if (!ready) {
-      onError('Firebase مش متوصل لسه.');
-      return;
+    final current = FirebaseAuth.instance.currentUser;
+    if (current != null && current.isAnonymous) {
+      try { return await current.linkWithCredential(credential); }
+      on FirebaseAuthException catch (error) {
+        if (error.code != 'credential-already-in-use') rethrow;
+      }
     }
-    await FirebaseAuth.instance.verifyPhoneNumber(
-      phoneNumber: phoneNumber,
-      verificationCompleted: (credential) async {
-        await FirebaseAuth.instance.signInWithCredential(credential);
-      },
-      verificationFailed: (error) => onError(error.message ?? error.code),
-      codeSent: (verificationId, _) => onCodeSent(verificationId),
-      codeAutoRetrievalTimeout: (_) {},
-    );
-  }
-
-  Future<UserCredential> confirmPhoneCode({
-    required String verificationId,
-    required String smsCode,
-  }) {
-    if (!ready) throw StateError('Firebase is not configured');
-    final credential = PhoneAuthProvider.credential(
-      verificationId: verificationId,
-      smsCode: smsCode,
-    );
     return FirebaseAuth.instance.signInWithCredential(credential);
   }
 
+  Future<User> ensureGuest() async {
+    if (!ready) throw StateError('Firebase is not configured');
+    return FirebaseAuth.instance.currentUser ??
+        (await FirebaseAuth.instance.signInAnonymously()).user!;
+  }
+
+  Future<String> idToken({bool forceRefresh = false}) async {
+    final user = await ensureGuest();
+    final token = await user.getIdToken(forceRefresh);
+    if (token == null) throw StateError('Authentication token unavailable');
+    return token;
+  }
   Future<void> signOut() async {
     if (!ready) return;
     await FirebaseAuth.instance.signOut();

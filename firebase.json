@@ -1,0 +1,24 @@
+{
+  "auth": {
+    "authorizedDomains": [
+      "localhost",
+      "maalish-8cd54.firebaseapp.com",
+      "maalish-8cd54.web.app"
+    ],
+    "providers": {
+      "anonymous": true,
+      "emailPassword": false,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Maalish",
+        "supportEmail": "increase.agency20@gmail.com"
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json",
+    "edition": "enterprise",
+    "database": "maalish",
+    "location": "europe-west3"
+  }
+}

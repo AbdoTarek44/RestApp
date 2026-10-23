@@ -1,0 +1,84 @@
+// Prototype rules: one private state document per authenticated Firebase UID.
+// users/{uid}/state/current:
+// ownerId: immutable string, 1..128 chars, must equal path UID and auth UID.
+// profileJson: opaque JSON string, <=16384 chars; contains client-owned preferences.
+// sessionsJson: opaque JSON string, <=262144 chars; contains session summaries.
+// JSON contents never grant permissions. They are decoded defensively by the app.
+// updatedAt: required server timestamp.
+// users/{uid}/conversations/{id}: ownerId, title<=120, preview<=160,
+// summary<=1600, mood<=80, closed/deleted booleans, createdAt immutable timestamp,
+// lastMessageAt timestamp, updatedAt server timestamp. Deleted metadata is an
+// empty tombstone so an old offline device cannot resurrect a deleted chat.
+// .../messages/{id}: ownerId, text 1..8000, fromUser bool, sentAt immutable timestamp,
+// updatedAt server timestamp. Roles are private content, never authorization.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() { return request.auth != null; }
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid
+        && (!exists(/databases/$(database)/documents/operationsUsers/$(uid))
+          || (get(/databases/$(database)/documents/operationsUsers/$(uid)).data.get('disabled',false) == false
+            && get(/databases/$(database)/documents/operationsUsers/$(uid)).data.get('deleting',false) == false));
+    }
+    function uidUnchanged(data, uid) { return data.ownerId == uid && data.ownerId == request.auth.uid; }
+    function uidNotModified() { return request.resource.data.ownerId == resource.data.ownerId; }
+    function isValidState(data, uid) {
+      return data.keys().hasAll(['ownerId', 'profileJson', 'sessionsJson', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'profileJson', 'sessionsJson', 'updatedAt'])
+        && data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128
+        && uidUnchanged(data, uid)
+        && data.profileJson is string && data.profileJson.size() <= 16384
+        && data.sessionsJson is string && data.sessionsJson.size() <= 262144
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+    match /users/{uid}/state/{stateId} {
+      allow read, delete: if stateId == 'current' && isOwner(uid);
+      allow create: if stateId == 'current' && isOwner(uid) && isValidState(request.resource.data, uid);
+      allow update: if stateId == 'current' && isOwner(uid) && uidNotModified() && isValidState(request.resource.data, uid);
+    }
+    function validConversation(data, uid) {
+      return data.keys().hasAll(['ownerId','title','preview','summary','mood','closed','deleted','createdAt','lastMessageAt','updatedAt'])
+        && data.keys().hasOnly(['ownerId','title','preview','summary','mood','closed','deleted','createdAt','lastMessageAt','updatedAt'])
+        && data.ownerId == uid && data.ownerId == request.auth.uid
+        && data.title is string && data.title.size() <= 120
+        && data.preview is string && data.preview.size() <= 160
+        && data.summary is string && data.summary.size() <= 1600
+        && data.mood is string && data.mood.size() <= 80
+        && data.closed is bool && data.deleted is bool
+        && (!data.deleted || (data.title == '' && data.preview == '' && data.summary == '' && data.mood == ''))
+        && data.createdAt is timestamp && data.lastMessageAt is timestamp
+        && data.updatedAt == request.time;
+    }
+    function validMessage(data, uid) {
+      return data.keys().hasAll(['ownerId','text','fromUser','sentAt','updatedAt'])
+        && data.keys().hasOnly(['ownerId','text','fromUser','sentAt','updatedAt'])
+        && data.ownerId == uid && data.ownerId == request.auth.uid
+        && data.text is string && data.text.size() > 0 && data.text.size() <= 8000
+        && data.fromUser is bool && data.sentAt is timestamp
+        && data.updatedAt == request.time;
+    }
+    match /users/{uid}/conversations/{conversationId} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && validConversation(request.resource.data, uid);
+      allow update: if isOwner(uid) && validConversation(request.resource.data, uid)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && (!resource.data.deleted || request.resource.data.deleted);
+      // Use a tombstone instead of deleting the parent before its children.
+      allow delete: if false;
+      match /messages/{messageId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validMessage(request.resource.data, uid)
+          && get(/databases/$(database)/documents/users/$(uid)/conversations/$(conversationId)).data.deleted == false;
+        allow update: if isOwner(uid) && validMessage(request.resource.data, uid)
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.text == resource.data.text
+          && request.resource.data.fromUser == resource.data.fromUser
+          && request.resource.data.sentAt == resource.data.sentAt
+          && get(/databases/$(database)/documents/users/$(uid)/conversations/$(conversationId)).data.deleted == false;
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

@@ -33,6 +33,12 @@ class _AuthScreenState extends State<AuthScreen> {
 
   Future<void> _guest() async {
     final prefs = await SharedPreferences.getInstance();
+    try {
+      if (AuthService.ready) await auth.ensureGuest();
+    } catch (_) {
+      _show('مقدرناش نتصل دلوقتي. جرّب تاني بعد شوية.');
+      return;
+    }
     await prefs.setBool('guest_mode', true);
     if (!mounted) return;
     Navigator.pushReplacement(
@@ -51,7 +57,7 @@ class _AuthScreenState extends State<AuthScreen> {
       await auth.signInWithGoogle();
       await _completeLogin();
     } catch (e) {
-      _show('مقدرناش نسجل بـGoogle: $e');
+      _show('مقدرناش نكمل الدخول بـGoogle. جرّب تاني أو ادخل كضيف مؤقتًا.');
     } finally {
       if (mounted) setState(() => loading = false);
     }

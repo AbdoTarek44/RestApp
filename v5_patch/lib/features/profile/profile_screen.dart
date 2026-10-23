@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_theme.dart';
-import '../../services/ai_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/memory_service.dart';
 import '../auth/auth_screen.dart';
@@ -15,11 +14,9 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final service = MemoryService();
   final auth = AuthService();
-  final ai = AiService();
   final name = TextEditingController();
-  final backend = TextEditingController();
   String style = 'متوازن';
-  bool humor = true, memory = true, adviceOnlyWhenAsked = true, loading = true, testing = false;
+  bool humor = true, memory = true, adviceOnlyWhenAsked = true, loading = true;
   List<String> memories = [];
   bool guest = false;
 
@@ -32,7 +29,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (!mounted) return;
     setState(() {
       name.text = p.nickname;
-      backend.text = p.backendUrl;
       style = p.style;
       humor = p.humor;
       memory = p.memoryEnabled;
@@ -51,22 +47,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       memoryEnabled: memory,
       adviceOnlyWhenAsked: adviceOnlyWhenAsked,
       memories: memories,
-      backendUrl: backend.text.trim(),
     ));
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اتحفظت إعداداتك')));
-  }
-
-  Future<void> _testBackend() async {
-    final value = backend.text.trim();
-    if (value.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اكتب رابط الـBackend الأول.')));
-      return;
-    }
-    setState(() => testing = true);
-    final ok = await ai.healthCheck(value);
-    if (!mounted) return;
-    setState(() => testing = false);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ok ? 'الاتصال بالـAI شغال ✅' : 'مفيش اتصال بالـAI حاليًا.')));
   }
 
   Future<void> _openLogin() async {
@@ -78,7 +60,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await auth.signOut();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('guest_mode', true);
-    if (mounted) setState(() => guest = true);
+    try { await auth.ensureGuest().timeout(const Duration(seconds: 8)); } catch (_) {}
+    await _load();
   }
 
   void _showMemories() {
@@ -126,7 +109,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-            child: user != null
+            child: user != null && !user.isAnonymous
                 ? Row(children: [
                     CircleAvatar(child: Text((user.displayName ?? user.phoneNumber ?? 'م').characters.first)),
                     const SizedBox(width: 12),
@@ -139,9 +122,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                     const Text('أنت داخل كضيف', style: TextStyle(fontWeight: FontWeight.w800)),
                     const SizedBox(height: 6),
-                    const Text('اعمل حساب عشان يبقى عندنا أساس للـCloud Sync والذاكرة بين الأجهزة بعدين.', style: TextStyle(color: AppColors.text2)),
+                    const Text('اربط حساب Google عشان تقدر ترجع لذاكرتك وسجل جلساتك من أجهزة تانية.', style: TextStyle(color: AppColors.text2)),
                     const SizedBox(height: 10),
-                    OutlinedButton(onPressed: _openLogin, child: const Text('سجل بـGoogle أو الموبايل')),
+                    OutlinedButton(onPressed: _openLogin, child: const Text('سجل بحساب Google')),
                   ]),
           ),
           const SizedBox(height: 22),
@@ -166,16 +149,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           SwitchListTile(value: memory, onChanged: (v) => setState(() => memory = v), title: const Text('افتكر المواضيع المهمة')),
           SwitchListTile(value: adviceOnlyWhenAsked, onChanged: (v) => setState(() => adviceOnlyWhenAsked = v), title: const Text('متدينيش نصايح إلا لما أطلب')),
           const SizedBox(height: 18),
-          const Text('AI Backend', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
-          TextField(controller: backend, textDirection: TextDirection.ltr, decoration: const InputDecoration(hintText: 'https://maalish-api.onrender.com')),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(onPressed: testing ? null : _testBackend, icon: const Icon(Icons.wifi_tethering_rounded), label: Text(testing ? 'بنجرب…' : 'اختبر اتصال الـAI')),
-          const SizedBox(height: 18),
           ElevatedButton(onPressed: _save, child: const Text('احفظ الإعدادات')),
           const Divider(height: 34),
           ListTile(onTap: _showMemories, title: const Text('معلش فاكر عني إيه؟'), trailing: const Icon(Icons.chevron_left_rounded)),
-          const ListTile(title: Text('الخصوصية'), subtitle: Text('الفضفضات والذاكرة محلية في النسخة الحالية، والـAI يمر عبر الـBackend.'), trailing: Icon(Icons.lock_outline_rounded)),
+          const ListTile(title: Text('الخصوصية'), subtitle: Text('الذاكرة وملخصات الجلسات بتتحفظ في حسابك مع نسخة محلية. رسائل المحادثة بتتبعت لخدمة Gemini عشان ترد عليك.'), trailing: Icon(Icons.lock_outline_rounded)),
         ],
       ),
     );

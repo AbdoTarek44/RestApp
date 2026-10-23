@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/chat_message.dart';
@@ -28,6 +29,8 @@ class _ChatScreenState extends State<ChatScreen> {
   String latestEmotion = '';
   List<String> latestCategories = const [];
   VentSession? pendingSession;
+  Timer? _replyTimer;
+  String? requestError;
 
   @override
   void initState() {
@@ -44,26 +47,86 @@ class _ChatScreenState extends State<ChatScreen> {
       typing = true;
     });
 
-    final r = await ai.reply(messages);
-    if (!mounted) return;
+    await _requestReply();
+  }
 
-    final profile = await memory.load();
-    if (profile.memoryEnabled) {
-      for (final candidate in r.memoryCandidates) {
+  Future<void> _requestReply() async {
+    if (messages.isEmpty) return;
+    setState(() { typing = true; requestError = null; });
+    _replyTimer?.cancel();
+    _replyTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && typing) setState(() {});
+    });
+    try {
+      final r = await ai.reply(messages);
+      if (!mounted) return;
+      final displayClock = Stopwatch()..start();
+      setState(() {
+        typing = false;
+        expression = r.expression;
+        showIntent = r.showIntentChoices;
+        safetyMode = r.safetyMode;
+        if (r.sessionTitle.trim().isNotEmpty) latestTitle = r.sessionTitle.trim();
+        if (r.emotion.trim().isNotEmpty) latestEmotion = r.emotion.trim();
+        if (r.categories.isNotEmpty) latestCategories = r.categories;
+        messages.add(ChatMessage(text: r.text, fromUser: false));
+      });
+      final trace = ai.lastTrace;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        displayClock.stop();
+        trace?.timings['display'] = displayClock.elapsedMilliseconds;
+      });
+      unawaited(_remember(r.memoryCandidates));
+    } on AiRequestException catch (error) {
+      if (mounted) setState(() { typing = false; requestError = error.message; });
+    } catch (_) {
+      if (mounted) setState(() { typing = false; requestError = 'تعذّر استلام الرد. جرّب تاني.'; });
+    } finally { _replyTimer?.cancel(); }
+  }
+
+  void _showTiming() {
+    final t = ai.lastTrace;
+    const labels = {
+      'prepare': 'تجهيز الرسالة', 'auth': 'التأكد من الدخول',
+      'request': 'الاتصال واستلام الرد', 'decode': 'قراءة الرد',
+      'server_auth': 'تحقق الدخول داخل السيرفر', 'server_gemini': 'انتظار Gemini',
+      'server_total': 'إجمالي وقت السيرفر', 'display': 'عرض الرد على الشاشة',
+      'total': 'الإجمالي قبل عرض الرد',
+    };
+    final lines = t == null ? 'لسه مفيش طلب.' : [
+      'الإصدار: V9 تجربة', 'الحالة: ${t.phase}',
+      for (final entry in t.timings.entries)
+        '${labels[entry.key] ?? entry.key}: ${(entry.value / 1000).toStringAsFixed(2)} ثانية',
+      if (t.timings.containsKey('request') && t.timings.containsKey('server_total'))
+        'خارج السيرفر (تقريبي): ${((t.timings['request']! - t.timings['server_total']!).clamp(0, 100000) / 1000).toStringAsFixed(2)} ثانية',
+      if (t.error != null) 'نتيجة الطلب: ${t.error}',
+      if (t.requestId != null) 'رقم التشخيص: ${t.requestId}',
+      'الأوقات الفرعية أجزاء من الإجمالي، مش بتتجمع عليه.',
+    ].join('\n');
+    showDialog<void>(context: context, builder: (_) => Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(title: const Text('تفاصيل زمن الرد'), scrollable: true,
+        content: SelectableText(lines),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('تمام'))]),
+    ));
+  }
+
+  @override
+  void dispose() {
+    _replyTimer?.cancel();
+    input.dispose();
+    super.dispose();
+  }
+
+  Future<void> _remember(List<String> candidates) async {
+    if (candidates.isEmpty) return;
+    try {
+      final profile = await memory.load();
+      if (!profile.memoryEnabled) return;
+      for (final candidate in candidates) {
         await memory.addMemory(candidate);
       }
-    }
-
-    setState(() {
-      typing = false;
-      expression = r.expression;
-      showIntent = r.showIntentChoices;
-      safetyMode = r.safetyMode;
-      if (r.sessionTitle.trim().isNotEmpty) latestTitle = r.sessionTitle.trim();
-      if (r.emotion.trim().isNotEmpty) latestEmotion = r.emotion.trim();
-      if (r.categories.isNotEmpty) latestCategories = r.categories;
-      messages.add(ChatMessage(text: r.text, fromUser: false));
-    });
+    } catch (_) { /* Reply is already displayed; local data stays available. */ }
   }
 
   Future<void> toggleVoice() async {
@@ -136,11 +199,12 @@ class _ChatScreenState extends State<ChatScreen> {
           title: Column(children: [
             const Text('معلش', style: TextStyle(fontWeight: FontWeight.w800)),
             Text(
-              safetyMode ? 'معاك بجدية 🤍' : listening ? 'سامع صوتك 🎙️' : typing ? 'بفكر معاك…' : 'سامعك 👂',
+              safetyMode ? 'معاك بجدية 🤍' : listening ? 'سامع صوتك 🎙️' : typing ? '${ai.lastTrace?.phase ?? 'بجهز الرد'} (${(ai.lastTrace?.clock.elapsedMilliseconds ?? 0) ~/ 1000} ث)' : 'سامعك 👂',
               style: const TextStyle(fontSize: 12, color: AppColors.text2),
             ),
           ]),
           centerTitle: true,
+          actions: [IconButton(onPressed: _showTiming, tooltip: 'تفاصيل زمن الرد', icon: const Icon(Icons.timer_outlined))],
         ),
         body: Column(children: [
           if (safetyMode)
@@ -163,11 +227,11 @@ class _ChatScreenState extends State<ChatScreen> {
               itemCount: messages.length + (typing ? 1 : 0),
               itemBuilder: (_, i) {
                 if (typing && i == messages.length) {
-                  return const Align(
+                  return Align(
                     alignment: Alignment.centerRight,
                     child: Padding(
                       padding: EdgeInsets.symmetric(vertical: 8),
-                      child: Text('معلش بيفكر…', style: TextStyle(color: AppColors.text2)),
+                      child: Text(ai.lastTrace?.phase ?? 'بجهز الرد…', style: const TextStyle(color: AppColors.text2)),
                     ),
                   );
                 }
@@ -191,6 +255,11 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
+          if (requestError != null)
+            MaterialBanner(content: Text(requestError!), actions: [
+              TextButton(onPressed: typing ? null : _requestReply, child: const Text('إعادة المحاولة')),
+              TextButton(onPressed: _showTiming, child: const Text('تفاصيل الزمن')),
+            ]),
           if (showIntent && !safetyMode)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
