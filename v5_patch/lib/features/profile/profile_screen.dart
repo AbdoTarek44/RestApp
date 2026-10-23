@@ -78,7 +78,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await auth.signOut();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('guest_mode', true);
-    if (mounted) setState(() => guest = true);
+    try { await auth.ensureGuest().timeout(const Duration(seconds: 8)); } catch (_) {}
+    await _load();
   }
 
   void _showMemories() {
@@ -126,7 +127,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-            child: user != null
+            child: user != null && !user.isAnonymous
                 ? Row(children: [
                     CircleAvatar(child: Text((user.displayName ?? user.phoneNumber ?? 'م').characters.first)),
                     const SizedBox(width: 12),
@@ -139,9 +140,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                     const Text('أنت داخل كضيف', style: TextStyle(fontWeight: FontWeight.w800)),
                     const SizedBox(height: 6),
-                    const Text('اعمل حساب عشان يبقى عندنا أساس للـCloud Sync والذاكرة بين الأجهزة بعدين.', style: TextStyle(color: AppColors.text2)),
+                    const Text('اربط حساب Google عشان تقدر ترجع لذاكرتك وسجل جلساتك من أجهزة تانية.', style: TextStyle(color: AppColors.text2)),
                     const SizedBox(height: 10),
-                    OutlinedButton(onPressed: _openLogin, child: const Text('سجل بـGoogle أو الموبايل')),
+                    OutlinedButton(onPressed: _openLogin, child: const Text('سجل بحساب Google')),
                   ]),
           ),
           const SizedBox(height: 22),
@@ -175,7 +176,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ElevatedButton(onPressed: _save, child: const Text('احفظ الإعدادات')),
           const Divider(height: 34),
           ListTile(onTap: _showMemories, title: const Text('معلش فاكر عني إيه؟'), trailing: const Icon(Icons.chevron_left_rounded)),
-          const ListTile(title: Text('الخصوصية'), subtitle: Text('الفضفضات والذاكرة محلية في النسخة الحالية، والـAI يمر عبر الـBackend.'), trailing: Icon(Icons.lock_outline_rounded)),
+          const ListTile(title: Text('الخصوصية'), subtitle: Text('الذاكرة وملخصات الجلسات بتتحفظ في حسابك مع نسخة محلية. رسائل المحادثة بتتبعت لخدمة Gemini عشان ترد عليك.'), trailing: Icon(Icons.lock_outline_rounded)),
         ],
       ),
     );
