@@ -10,6 +10,7 @@ import 'ai_service.dart';
 class NotificationService {
   static const _native=MethodChannel('maalish/notifications');
   static bool _initialized=false;
+  static int _generation=0;
   static String? _owner;
   static Future<void> _queue=Future<void>.value();
   static String _key(String uid)=>'$uid:push_enabled_v11';
@@ -57,14 +58,22 @@ class NotificationService {
     else {await detach();}
   }
   static Future<void> _enable(String uid) async {
+    final generation=_generation;
+    if(_uid!=uid || !await enabled())return;
     final token=await FirebaseMessaging.instance.getToken().timeout(const Duration(seconds:10));
     if(token==null)throw StateError('تعذّر تسجيل الجهاز للإشعارات.');
+    if(_uid!=uid || generation!=_generation || !await enabled())return;
     await _register(uid,token,true);
+    if(_uid!=uid || generation!=_generation || !await enabled()) {
+      if(_uid==uid) {try{await _register(uid,token,false);}catch(_){}}
+      return;
+    }
     _owner=uid;
     await (await SharedPreferences.getInstance()).setString('push_registration_v11',token);
     await (await SharedPreferences.getInstance()).setString('push_registration_owner_v11',uid);
   }
   static Future<void> detach() async {
+    _generation++;
     final p=await SharedPreferences.getInstance();
     final token=p.getString('push_registration_v11');final uid=_uid;
     try{if(token!=null&&uid!=null)await _register(uid,token,false);}catch(_){}

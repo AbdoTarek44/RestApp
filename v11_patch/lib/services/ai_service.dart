@@ -78,7 +78,7 @@ class AiService {
     final recent = messages.skip(messages.length > 20 ? messages.length - 20 : 0).toList();
     Map<String,dynamic> payload() => {
       'conversationSummary': conversationSummary,
-      'compactContext':messages.length<=10 && conversationSummary.isEmpty,
+      'compactContext':messages.length<=10 && conversationSummary.isEmpty && utf8.encode(jsonEncode(recent.map((m)=>m.text).toList())).length<28000,
       'messages': recent.map((m) => {'role':m.fromUser ? 'user':'assistant','content':m.text}).toList(),
       'profile': {'nickname':profile.nickname,'style':profile.style,'humor':profile.humor,
         'adviceOnlyWhenAsked':profile.adviceOnlyWhenAsked,

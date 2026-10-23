@@ -75,6 +75,20 @@ test('consecutive user messages after a failed reply keep one provider turn', as
   }finally{globalThis.fetch=previous;}
 });
 
+test('compact first replies defer summaries without dropping safety or older context',async()=>{
+ const previous=globalThis.fetch;let generated;
+ globalThis.fetch=async(url,options)=>{if(String(url).includes('generativelanguage.googleapis.com'))generated=JSON.parse(options.body);return previous(url,options);};
+ try{
+  const valid=await token();
+  const response=await worker.fetch(chat({messages:[{role:'user',content:'hello'}],compactContext:true},valid),env);
+  assert.equal(response.status,200);assert.ok(generated.system_instruction.parts[0].text.includes('conversationSummary يجب أن يكون نصًا فارغًا'));
+  assert.ok(generated.generationConfig.response_schema.required.includes('safetyMode'));
+  await worker.fetch(chat({messages:[{role:'user',content:'continue'}],compactContext:true,conversationSummary:'Saved older context'},valid),env);
+  assert.equal(generated.system_instruction.parts[0].text.includes('conversationSummary يجب أن يكون نصًا فارغًا'),false);
+  assert.ok(generated.system_instruction.parts[0].text.includes('Saved older context'));
+ }finally{globalThis.fetch=previous;}
+});
+
 test('admin access requires verified Google identity, allowlist and recent live account', async () => {
   const pem = '-----BEGIN PRIVATE KEY-----\n'+Buffer.from(await crypto.subtle.exportKey('pkcs8',pair.privateKey)).toString('base64')+'\n-----END PRIVATE KEY-----';
   const adminEnv={...env,ADMIN_EMAILS:'owner@example.com',GOOGLE_OPERATIONS_CREDENTIALS:JSON.stringify({client_email:'operations@example.com',private_key:pem})};

@@ -148,11 +148,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خلّي الرسالة أقل من ٥٠٠٠ حرف وقسّم الكلام على رسايل.')));
       return;
     }
-    if (!moodAsked) {
-      moodPrompting = true;
-      try { await _askMood(); } finally { moodPrompting = false; }
-      if (!mounted || !conversations.current) return;
-    }
     setState(() {
       messages.add(ChatMessage(text: text, fromUser: true));
       input.clear();
@@ -165,11 +160,17 @@ class _ChatScreenState extends State<ChatScreen> {
       if (mounted) setState(() { typing = false; saveError = 'تعذّر حفظ الرسالة على الجهاز؛ جرّب الحفظ تاني.'; });
       return;
     }
+    if (!mounted || !conversations.current) return;
+    if (!moodAsked) {
+      moodPrompting = true;
+      try { await _askMood(); } finally { moodPrompting = false; }
+      if (!mounted || !conversations.current) return;
+    }
     await _requestReply();
   }
 
   Future<void> _requestReply() async {
-    if (messages.isEmpty) return;
+    if (messages.isEmpty || !mounted) return;
     setState(() { typing = true; requestError = null; });
     _replyTimer?.cancel();
     _replyTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -179,9 +180,9 @@ class _ChatScreenState extends State<ChatScreen> {
       if (!conversations.current) throw StateError('Account changed');
       await _persist();
       final r = await ai.reply(messages, conversationSummary: conversation?.summary ?? '');
-      if (!mounted) return;
+      if (!conversations.current) return;
       final displayClock = Stopwatch()..start();
-      setState(() {
+      void applyReply() {
         expression = r.expression;
         showIntent = r.showIntentChoices;
         safetyMode = r.safetyMode;
@@ -190,7 +191,8 @@ class _ChatScreenState extends State<ChatScreen> {
         if (r.emotion.trim().isNotEmpty) latestEmotion = r.emotion.trim();
         if (r.categories.isNotEmpty) latestCategories = r.categories;
         messages.add(ChatMessage(text: r.text, fromUser: false));
-      });
+      }
+      if (mounted) { setState(applyReply); } else { applyReply(); }
       final trace = ai.lastTrace;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         displayClock.stop();
@@ -247,7 +249,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _remember(List<String> candidates) async {
-    if (candidates.isEmpty) return;
+    if (candidates.isEmpty || !conversations.current) return;
     try {
       final profile = await memory.load();
       if (!profile.memoryEnabled) return;
