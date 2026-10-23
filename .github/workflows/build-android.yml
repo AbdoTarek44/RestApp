@@ -3,6 +3,7 @@ name: Build Maalish Android APK
 on:
   push:
     branches: [master]
+  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -32,22 +33,15 @@ jobs:
           node --check backend/server.js
           node --check cloudflare-worker/src/index.js
 
-      - name: Rebuild Maalish base and apply V6 patches
+      - name: Rebuild Maalish base and apply V7 patches
         run: |
-          cat build_src_v2_small/part_*.b64 | base64 -d > maalish_source_v2.zip
-          rm -rf unpacked app
-          mkdir -p unpacked
-          unzip -o maalish_source_v2.zip -d unpacked || true
-          cp -R unpacked/maalish_app app
-          cp -R v3_patch/lib/* app/lib/
-          cp -R v4_patch/lib/* app/lib/
-          cp -R v5_patch/lib/* app/lib/
+          python scripts/reconstruct.py
           python - <<'PY'
           from pathlib import Path
           p = Path('app/pubspec.yaml')
-          s = p.read_text().replace('version: 0.2.0+2','version: 0.6.0+6')
+          s = p.read_text().replace('version: 0.2.0+2','version: 0.7.0+7')
           if 'firebase_core:' not in s:
-              s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.0.0\n  firebase_auth: ^7.0.0\n  google_sign_in: ^7.2.0')
+              s = s.replace('  speech_to_text: ^7.0.0', '  speech_to_text: ^7.0.0\n  firebase_core: ^5.1.0\n  firebase_auth: ^7.0.1\n  google_sign_in: ^7.2.0\n  cloud_firestore: ^7.1.0')
           p.write_text(s)
           PY
 
@@ -75,24 +69,30 @@ jobs:
         working-directory: app
         run: flutter pub get
 
+      - name: Analyze Flutter sources
+        working-directory: app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Report APK signing certificate
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -keypass android -alias androiddebugkey -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -validity 10000
+          fi
+          keytool -list -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey
+
       - name: Build release APK
         working-directory: app
         run: >-
           flutter build apk --release
-          --dart-define=FIREBASE_API_KEY=${{ secrets.FIREBASE_API_KEY }}
-          --dart-define=FIREBASE_APP_ID=${{ secrets.FIREBASE_APP_ID }}
-          --dart-define=FIREBASE_MESSAGING_SENDER_ID=${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}
-          --dart-define=FIREBASE_PROJECT_ID=${{ secrets.FIREBASE_PROJECT_ID }}
-          --dart-define=FIREBASE_STORAGE_BUCKET=${{ secrets.FIREBASE_STORAGE_BUCKET }}
-          --dart-define=GOOGLE_WEB_CLIENT_ID=${{ secrets.GOOGLE_WEB_CLIENT_ID }}
-          --dart-define=MAALISH_API_URL=${{ secrets.MAALISH_API_URL }}
+          --dart-define-from-file=../config/firebase.android.json
 
       - name: Collect APK
-        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v6-release.apk
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk Maalish-v7-release.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Maalish-v6-APK
-          path: Maalish-v6-release.apk
+          name: Maalish-v7-APK
+          path: Maalish-v7-release.apk
           if-no-files-found: error
