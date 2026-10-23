@@ -149,3 +149,14 @@ test('uncertain scheduled reminder is not resent after timeout',async()=>{
  failSend=true;assert.equal((await runReminders(env,now)).failed,1);failSend=false;
  assert.equal((await runReminders(env,now)).accepted,0);assert.equal(sends.length,0);
 });
+test('policy acknowledgment is explicit, versioned and preserved by session writes',async()=>{
+ const before=await handleEngagement(new Request('https://example.com/insights/consent',{headers:{authorization:'Bearer '+await token()}}),env);
+ assert.deepEqual(await before.json(),{enabled:false,policyVersion:0});assert.equal(store.size,0);
+ assert.equal((await user('/insights/consent',{enabled:true,policyVersion:99})).status,400);
+ assert.equal((await user('/insights/consent',{enabled:true,policyVersion:12})).status,200);
+ const accepted=store.get('users/user1/preferences/insights').fields.acceptedAt.integerValue;
+ assert.equal((await user('/insights/session',event)).status,200);
+ const doc=store.get('users/user1/preferences/insights');assert.equal(doc.fields.policyVersion.integerValue,'12');assert.equal(doc.fields.acceptedAt.integerValue,accepted);
+ const after=await handleEngagement(new Request('https://example.com/insights/consent',{headers:{authorization:'Bearer '+await token()}}),env);
+ assert.deepEqual(await after.json(),{enabled:true,policyVersion:12});
+});

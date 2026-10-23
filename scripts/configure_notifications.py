@@ -46,7 +46,8 @@ class MainActivity: FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when(call.method) {
                     "channel" -> { notificationChannel(); result.success(null) }
-                    "settings" -> {
+                    "privacy" -> { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://maalish-ai.maalish-abdotarek44.workers.dev/privacy"))); result.success(null) }
+                "settings" -> {
                         if (Build.VERSION.SDK_INT >= 26) {
                             startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
                         } else {

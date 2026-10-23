@@ -1,4 +1,3 @@
-import '../../services/insights_service.dart';
 import '../../services/notification_service.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -25,7 +24,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool humor = true, memory = true, adviceOnlyWhenAsked = true, loading = true;
   List<String> memories = [];
   bool guest = false;
-  bool deleting = false, crashReports = false, pushEnabled = false, insightEnabled = false, pushBusy = false;
+  bool deleting = false, crashReports = false, pushEnabled = false, pushBusy = false;
 
   @override
   void initState() { super.initState(); _load(); }
@@ -34,7 +33,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final p = await service.load();
     final prefs = await SharedPreferences.getInstance();
     final push = await NotificationService.enabled();
-    final insight = await InsightsService().enabled();
     if (!mounted) return;
     setState(() {
       name.text = p.nickname;
@@ -44,7 +42,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       adviceOnlyWhenAsked = p.adviceOnlyWhenAsked;
       memories = p.memories;
       guest = prefs.getBool('guest_mode') ?? false;
-      pushEnabled = push; insightEnabled = insight;
+      pushEnabled = push;
       crashReports = prefs.getBool('crash_reports_enabled') ?? false;
       loading = false;
     });
@@ -225,9 +223,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               if(mounted)setState(() {pushBusy=false;pushEnabled=current;});
             }),
           TextButton(onPressed:NotificationService.openSettings,child:const Text('إعدادات إشعارات الجهاز')),
-          SwitchListTile(value: insightEnabled,title:const Text('مشاركة إحصائيات الجلسات'),
-            subtitle:const Text('اختياري: تصنيفات عامة وشعورك قبل وبعد فقط، بدون رسائلك. إيقاف المشاركة يمسح سجلات التحليل المرتبطة بحسابك عند الاتصال.'),
-            onChanged:(value) async { await InsightsService().setEnabled(value); if(mounted)setState(()=>insightEnabled=value); }),
+          const ListTile(leading:Icon(Icons.insights_outlined),title:Text('فهم تجربة معلش'),subtitle:Text('التصنيفات العامة وتقييمات الجلسات جزء من بيانات الخدمة بعد الموافقة عند أول فضفضة. الإدارة بتشوف أرقامًا مجمّعة، مش نصوص كلامك. اختيار الشعور نفسه مش إجباري.')),
           SwitchListTile(value: crashReports, title: const Text('مشاركة تقارير الأعطال'),
             subtitle: const Text('اختياري: معلومات تقنية عن الأعطال لمساعدتنا نصلحها. لا نضيف رسائلك أو ذكرياتك للتقارير.'),
             onChanged: (value) async {
@@ -239,7 +235,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Divider(height: 34),
           ListTile(onTap: _showMemories, title: const Text('معلش فاكر عني إيه؟'), trailing: const Icon(Icons.chevron_left_rounded)),
           ListTile(enabled: !deleting, onTap: _deleteAccount, leading: const Icon(Icons.person_remove_outlined), title: Text(deleting ? 'جاري حذف الحساب…' : 'حذف الحساب وبياناته')),
-          const ListTile(title: Text('الخصوصية'), subtitle: Text('الذاكرة والمحادثات بتتحفظ في حسابك مع نسخة محلية. تقدر تحذف كل محادثة أو معلومة لوحدها. رسائل المحادثة بتتبعت لخدمة Gemini عشان ترد عليك.'), trailing: Icon(Icons.lock_outline_rounded)),
+          ListTile(onTap:NotificationService.openPrivacy,title:const Text('الخصوصية'),subtitle:const Text('محادثاتك وذاكرتك محفوظين في حسابك مع نسخة على جهازك، وبيتعالجوا عبر خدمات ذكاء اصطناعي خارجية لتوليد الرد. تقدر تحذف المحادثات أو الذكريات، وتشوف تفاصيل معالجة البيانات في السياسة الكاملة.'),trailing:const Icon(Icons.lock_outline_rounded)),
+          const SizedBox(height:24),
+          Center(child:Image.asset('assets/branding/maalish-icon.png',width:64,height:64)),
+          const SizedBox(height:12),const Center(child:Text('معلش — مساحة للكلام براحتك',style:TextStyle(fontWeight:FontWeight.bold))),
+          const SizedBox(height:8),
+          Container(padding:const EdgeInsets.all(18),decoration:BoxDecoration(color:Colors.white,borderRadius:BorderRadius.circular(16)),child:Column(children:[
+            Image.asset('assets/branding/increase-logo.png',height:40,fit:BoxFit.contain,semanticLabel:'Increase'),
+            const SizedBox(height:12),const Text('تطبيق معلش تابع لشركة Increase',textAlign:TextAlign.center),
+            const SizedBox(height:4),const Text('© 2026 Increase. جميع الحقوق محفوظة.',textAlign:TextAlign.center,style:TextStyle(fontSize:12,color:AppColors.text2)),
+          ])),const SizedBox(height:24),
         ],
       ),
     );

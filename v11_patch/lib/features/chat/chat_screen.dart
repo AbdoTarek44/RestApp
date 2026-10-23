@@ -75,6 +75,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _scrollToEnd();
       if (widget.conversationId == null && widget.initialText.trim().isNotEmpty) {
         await send(widget.initialText);
+        if(mounted && messages.isEmpty)input.text=widget.initialText;
       }
     } catch (_) {
       if (mounted) setState(() { opening = false; saveError = 'مقدرناش نفتح الفضفضة. ارجع وجرّب تاني.'; });
@@ -113,8 +114,6 @@ class _ChatScreenState extends State<ChatScreen> {
     if (moodAsked) return;
     moodAsked = true;
     var selected = 'skip';
-    final previousConsent = await insights.enabled();
-    var consent = previousConsent;
     if (!mounted) return;
     final result = await showModalBottomSheet<String>(context: context, isScrollControlled:true,
       showDragHandle:true, builder:(sheet) => StatefulBuilder(builder:(sheet,update) =>
@@ -129,16 +128,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 ChoiceChip(label:Text(choice.value),selected:selected==choice.key,
                   onSelected:(_)=>update(()=>selected=choice.key)),
             ]),const SizedBox(height:16),
-            SwitchListTile(contentPadding:EdgeInsets.zero,value:consent,
-              onChanged:(value)=>update(()=>consent=value),title:const Text('أشارك إحصائيات الجلسات'),
-              subtitle:const Text('اختياري: نوع الموضوع وشعورك قبل وبعد، بدون رسائلك أو عنوان فضفضتك. بيظهروا للإدارة كأرقام مجمّعة، وتقدر توقف المشاركة وتمسحها من الإعدادات.')),
             const SizedBox(height:12),FilledButton(onPressed:()=>Navigator.pop(sheet,selected),child:const Text('يلا نحكي')),
             TextButton(onPressed:()=>Navigator.pop(sheet,'skip'),child:const Text('أتخطى اختيار الشعور')),
           ]))))));
     beforeMood = result ?? 'skip';
-    // Dismissing the sheet never changes consent.
-    shareThisRun = result == null ? previousConsent : consent;
-    if(result != null && consent != previousConsent) await insights.setEnabled(consent);
+    shareThisRun = true;
     if(shareThisRun) unawaited(insights.report(runId:insightRunId,phase:'start',beforeMood:beforeMood));
   }
 
@@ -149,6 +143,10 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خلّي الرسالة أقل من ٥٠٠٠ حرف وقسّم الكلام على رسايل.')));
       return;
     }
+    moodPrompting=true;
+    bool accepted;
+    try { accepted=await insights.requireDisclosure(context); } finally { moodPrompting=false; }
+    if(!accepted || !mounted || !conversations.current)return;
     setState(() {
       messages.add(ChatMessage(text: text, fromUser: true));
       input.clear();
@@ -219,12 +217,12 @@ class _ChatScreenState extends State<ChatScreen> {
     const labels = {
       'prepare': 'تجهيز الرسالة', 'auth': 'التأكد من الدخول',
       'request': 'الاتصال واستلام الرد', 'decode': 'قراءة الرد',
-      'server_auth': 'تحقق الدخول داخل السيرفر', 'server_gemini': 'انتظار Gemini',
+      'server_auth': 'تحقق الدخول داخل السيرفر', 'server_gemini': 'توليد الرد',
       'server_total': 'إجمالي وقت السيرفر', 'display': 'عرض الرد على الشاشة',
       'total': 'الإجمالي قبل عرض الرد',
     };
     final lines = t == null ? 'لسه مفيش طلب.' : [
-      'الإصدار: V9 تجربة', 'الحالة: ${t.phase}',
+      'الإصدار: V12 قبل النشر', 'الحالة: ${t.phase}',
       for (final entry in t.timings.entries)
         '${labels[entry.key] ?? entry.key}: ${(entry.value / 1000).toStringAsFixed(2)} ثانية',
       if (t.timings.containsKey('request') && t.timings.containsKey('server_total'))

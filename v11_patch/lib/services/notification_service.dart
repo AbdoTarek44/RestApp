@@ -98,6 +98,7 @@ class NotificationService {
   static Future<void> offerOnce(BuildContext context) async {
     final prefs=await SharedPreferences.getInstance();
     if(prefs.getBool('push_onboarding_seen_v11')==true || !context.mounted)return;
+    if(await enabled()){await prefs.setBool('push_onboarding_seen_v11',true);return;}
     await prefs.setBool('push_onboarding_seen_v11',true);
     if(!context.mounted)return;
     final allow=await showDialog<bool>(context:context,builder:(dialog)=>Directionality(
@@ -125,5 +126,6 @@ class NotificationService {
       }finally{client.close();}
     }catch(_){ /* Optional timing never delays the reply. */ }
   }
+  static Future<void> openPrivacy()=>_native.invokeMethod<void>('privacy');
   static Future<void> openSettings()=>_native.invokeMethod<void>('settings');
 }

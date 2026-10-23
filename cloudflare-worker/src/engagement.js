@@ -50,7 +50,8 @@ export async function handleEngagement(request,env){
  try{identity=await verifyFirebaseToken(request.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1],env.FIREBASE_PROJECT_ID);}catch{return response({error:'Authentication required'},401);}
  if(request.method==='GET'){
   try{if(!await accountAllowed(env,identity))return response({error:'Account disabled'},403);
-   return response({enabled:decode(await get(env,`users/${identity.sub}/preferences/insights`)).enabled===true});}
+   const consent=decode(await get(env,`users/${identity.sub}/preferences/insights`));
+   return response({enabled:consent.enabled===true,policyVersion:consent.policyVersion||0});}
   catch{return response({error:'Consent unavailable'},503);}
  }
  let data;try{data=await body(request);}catch{return response({error:'Invalid request'},400);}
@@ -87,8 +88,8 @@ export async function handleEngagement(request,env){
    return response({ok:true});
   }
   if(path==='/insights/consent'){
-   if(!validKeys(data,['enabled'])||typeof data.enabled!=='boolean')return response({error:'Invalid consent'},400);
-   await put(env,`users/${uid}/preferences/insights`,{enabled:data.enabled});
+   if(!validKeys(data,['enabled','policyVersion'])||typeof data.enabled!=='boolean'||(data.policyVersion!==undefined&&data.policyVersion!==12))return response({error:'Invalid consent'},400);
+   await put(env,`users/${uid}/preferences/insights`,{enabled:data.enabled,...(data.policyVersion===12?{policyVersion:12,acceptedAt:Date.now()}: {})});
    if(!data.enabled)await purgeInsights(env,uid);
    return response({ok:true});
   }
@@ -103,7 +104,7 @@ export async function handleEngagement(request,env){
     updatedAt:Date.now(),finished,beforeMood:previous.beforeMood||data.beforeMood,
     afterMood:finished?data.afterMood:'skip',categories:[...new Set([...(previous.categories||[]),...data.categories])].slice(0,6)};
    try{await googleRequest(env,base(env)+':commit','POST',{writes:[
-    {update:{name:name(env,`users/${uid}/preferences/insights`),fields:fields({enabled:true})},currentDocument:{updateTime:consentDoc.updateTime}},
+    {update:{name:name(env,`users/${uid}/preferences/insights`),fields:fields({enabled:true,...(consent.policyVersion===12?{policyVersion:12,acceptedAt:consent.acceptedAt}: {})})},currentDocument:{updateTime:consentDoc.updateTime}},
     {update:{name:name(env,eventPath),fields:fields(value)},
      currentDocument:old?{updateTime:old.updateTime}:{exists:false}}]});}
    catch(error){if(error.message.includes('(409)')||error.message.includes('(412)'))return response({error:'Retry session event'},409);throw error;}
