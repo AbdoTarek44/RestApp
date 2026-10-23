@@ -62,13 +62,19 @@ function json(data, status = 200, extraHeaders = {}) {
 
 function normalizeMessages(messages) {
   if (!Array.isArray(messages)) return [];
-  return messages
+  const normalized = messages
     .filter(m => m && typeof m.content === 'string' && ['user', 'assistant'].includes(m.role))
     .slice(-20)
     .map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content.slice(0, 5000) }]
     }));
+  const combined = [];
+  for (const message of normalized) {
+    if (combined.at(-1)?.role === message.role) combined.at(-1).parts.push(...message.parts);
+    else combined.push(message);
+  }
+  return combined;
 }
 
 function acuteSafetySignal(text) {

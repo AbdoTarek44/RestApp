@@ -20,6 +20,7 @@ function renderOverview(data){
   overview=data;const totals=data.daily.reduce((a,d)=>{for(const k of ['requests','successes','errors','durationMs','inputTokens','outputTokens'])a[k]=(a[k]||0)+Number(d[k]||0);return a;},{});
   const cost=(totals.inputTokens*data.settings.inputPrice+totals.outputTokens*data.settings.outputPrice)/1e6;
   const cards=[['إجمالي حسابات Firebase',num(data.totalUsers)],['حسابات نشطة اليوم',num(data.activeToday)+(data.activeTodayCapped?'+':'')],['طلبات آخر ٣٠ يومًا',num(totals.requests)],['نسبة الأخطاء',totals.requests?(totals.errors/totals.requests*100).toFixed(1)+'%':'—'],['متوسط وقت السيرفر',totals.requests?(totals.durationMs/totals.requests/1000).toFixed(2)+' ث':'—'],['تكلفة تقديرية للفترة',data.settings.inputPrice||data.settings.outputPrice?'$'+cost.toFixed(4):'غير محددة']];
+  cards.splice(2,0,['محادثات محفوظة بالنظام الجديد',data.totalConversations===null?'غير متاح':num(data.totalConversations)],['رسائل محفوظة',data.totalMessages===null?'غير متاح':num(data.totalMessages)]);
   $('cards').replaceChildren();for(const [label,value]of cards){const div=document.createElement('div');div.className='card';const small=document.createElement('small');small.textContent=label;const strong=document.createElement('strong');strong.textContent=value;div.append(small,strong);$('cards').append(div);}
   $('chart').replaceChildren();const max=Math.max(1,...data.daily.map(d=>d.requests||0));for(const d of data.daily){const bar=document.createElement('div');bar.className='bar';bar.style.height=Math.max(2,(d.requests||0)/max*100)+'%';bar.title=d.day+': '+num(d.requests);$('chart').append(bar);}
   $('health').replaceChildren();const p=document.createElement('p');p.textContent=(data.settings.maintenance?'الخدمة في وضع صيانة':'الردود متاحة')+' · '+data.model;$('health').append(p);
@@ -47,7 +48,11 @@ $('next').onclick=()=>action(()=>loadUsers(nextPage));
 $('settingsForm').onsubmit=e=>{e.preventDefault();const data={};for(const[k,v]of Object.entries(overview.settings)){data[k]=typeof v==='boolean'?$(k).checked:typeof v==='number'?Number($(k).value):$(k).value;}if(confirm('تطبيق الإعدادات الجديدة على الخدمة؟'))action(async()=>{await api('settings',data);renderOverview(await api('overview'));});};
 $('export').onclick=()=>{
   // Prevent spreadsheet formula execution in names/emails supplied by accounts.
-  const csv=v=>'"'+String(v??'').replace(/^[=+@\-\t\r]/,"'$&").replace(/"/g,'""')+'"';
+  const csv=v=>{
+    const text=String(v??'');
+    const safe=/^\s*[=+@-]/.test(text)||/^[\t\r\n]/.test(text)?"'"+text:text;
+    return '"'+safe.replace(/"/g,'""')+'"';
+  };
   const lines=[['UID','Email','Name','Disabled','Created','Last login'],...users.map(u=>[u.uid,u.email,u.name,u.disabled,new Date(u.createdAt).toISOString(),u.lastLoginAt?new Date(u.lastLoginAt).toISOString():''])];
   const url=URL.createObjectURL(new Blob(['\ufeff'+lines.map(r=>r.map(csv).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='maalish-users-current-page.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };

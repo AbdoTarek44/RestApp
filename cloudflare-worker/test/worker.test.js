@@ -61,6 +61,20 @@ test('unconfigured worker fails closed', async () => {
   assert.equal((await worker.fetch(chat(),{GEMINI_API_KEY:'x'})).status,503);
 });
 
+test('consecutive user messages after a failed reply keep one provider turn', async () => {
+  const previous=globalThis.fetch;let contents;
+  globalThis.fetch=async(url,options)=>{
+    if(String(url).includes('generativelanguage.googleapis.com'))contents=JSON.parse(options.body).contents;
+    return previous(url,options);
+  };
+  try{
+    const response=await worker.fetch(chat({messages:[{role:'user',content:'first'},{role:'user',content:'follow-up'}]},await token()),env);
+    assert.equal(response.status,200);assert.equal(contents.length,1);
+    assert.equal(contents[0].parts.length,2);
+    assert.equal(contents[0].parts[1].text,'follow-up');
+  }finally{globalThis.fetch=previous;}
+});
+
 test('admin access requires verified Google identity, allowlist and recent live account', async () => {
   const pem = '-----BEGIN PRIVATE KEY-----\n'+Buffer.from(await crypto.subtle.exportKey('pkcs8',pair.privateKey)).toString('base64')+'\n-----END PRIVATE KEY-----';
   const adminEnv={...env,ADMIN_EMAILS:'owner@example.com',GOOGLE_OPERATIONS_CREDENTIALS:JSON.stringify({client_email:'operations@example.com',private_key:pem})};
@@ -75,8 +89,13 @@ test('admin access requires verified Google identity, allowlist and recent live 
       return Response.json({users:[{localId:body.localId?.[0]||'target',email:body.localId?.[0]==='guest-1'?'owner@example.com':'user@example.com',disabled,validSince:'1'}]});
     }
     if(path.includes('accounts:batchGet'))return Response.json({users:[{localId:'target',email:'user@example.com',passwordHash:'MUST NOT LEAK',salt:'PRIVATE',providerUserInfo:[{providerId:'google.com'}]}]});
+    if(path.includes(':queryAccounts'))return Response.json({recordsCount:'2'});
     if(path.includes('accounts:update')){writes.push({url:path,body:JSON.parse(options.body)});return Response.json({localId:'target'});}
-    if(path.includes('firestore.googleapis.com')){writes.push({url:path,body:options.body?JSON.parse(options.body):null});return Response.json({});}
+    if(path.includes('firestore.googleapis.com')){
+      if(path.endsWith(':runAggregationQuery'))return Response.json([{result:{aggregateFields:{total:{integerValue:'6'}}}}]);
+      if(path.endsWith(':runQuery'))return Response.json([]);
+      writes.push({url:path,body:options.body?JSON.parse(options.body):null});return Response.json({});
+    }
     throw new Error('Unexpected admin request');
   };
   const adminClaims={email:'owner@example.com',email_verified:true,firebase:{sign_in_provider:'google.com'}};
@@ -105,5 +124,7 @@ test('admin access requires verified Google identity, allowlist and recent live 
     const settings={maintenance:false,maintenanceMessage:'Soon',announcement:'Hello',temperature:.65,maxOutputTokens:1100,inputPrice:0,outputPrice:0};
     assert.equal((await request(adminClaims,'/api/admin/settings',settings)).status,200);
     assert.equal((await request(adminClaims,'/api/admin/settings',{...settings,temperature:9})).status,400);
+    const overview=await request(adminClaims,'/api/admin/overview');assert.equal(overview.status,200);
+    assert.equal((await overview.json()).totalMessages,6);
   }finally{globalThis.fetch=previous;}
 });

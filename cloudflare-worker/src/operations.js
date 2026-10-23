@@ -75,6 +75,12 @@ async function query(env,parent,collection,limit=100) {
     structuredQuery:{from:[{collectionId:collection}],limit}});
   return (data||[]).filter(v=>v.document).map(v=>({id:v.document.name.split('/').pop(),...unpack(v.document)}));
 }
+async function countDocuments(env,collection,where) {
+  const result=await googleRequest(env,db(env)+':runAggregationQuery','POST',{
+    structuredAggregationQuery:{structuredQuery:{from:[{collectionId:collection,allDescendants:true}],...(where?{where}:{})},
+      aggregations:[{alias:'total',count:{}}]}});
+  return Number(result?.[0]?.result?.aggregateFields?.total?.integerValue||0);
+}
 async function increment(env,path,counts,values={}) {
   const name=`projects/${env.FIREBASE_PROJECT_ID}/databases/maalish/documents/${path}`;
   const fields=Object.fromEntries(Object.entries(values).map(([k,v])=>[k,f(v)]));
@@ -137,13 +143,16 @@ export async function handleAdmin(request,env) {
       return respond({users:(result?.users||[]).map(safeUser),nextPageToken:result?.nextPageToken||''});
     }
     if(path==='/api/admin/overview' && request.method==='GET') {
-      const [count,daily,activity,logs,settings]=await Promise.all([
+      const [count,daily,activity,logs,settings,totalConversations,totalMessages]=await Promise.all([
         googleRequest(env,`https://identitytoolkit.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}:queryAccounts`,'POST',{returnUserInfo:false}),
         query(env,'','operationsDaily',1000),
         query(env,'operationsActivity/'+new Date().toISOString().slice(0,10),'users',20000),
-        query(env,'','operationsAudit',1000), appSettings(env)]);
+        query(env,'','operationsAudit',1000), appSettings(env),
+        countDocuments(env,'conversations',{fieldFilter:{field:{fieldPath:'deleted'},op:'EQUAL',value:{booleanValue:false}}}).catch(()=>null),
+        countDocuments(env,'messages').catch(()=>null)]);
       return respond({totalUsers:Number(count.recordsCount||0),activeToday:activity.length,
         activeTodayCapped:activity.length===20000,daily:daily.sort((a,b)=>a.id.localeCompare(b.id)).slice(-30),
+        totalConversations,totalMessages,
         audit:logs.sort((a,b)=>String(b.at).localeCompare(String(a.at))).slice(0,30),settings,model:env.MAALISH_MODEL||'gemini-3.5-flash-lite'});
     }
     if(request.method==='POST') {
