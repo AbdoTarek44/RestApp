@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/chat_message.dart';
@@ -47,13 +48,6 @@ class _ChatScreenState extends State<ChatScreen> {
     final r = await ai.reply(messages);
     if (!mounted) return;
 
-    final profile = await memory.load();
-    if (profile.memoryEnabled) {
-      for (final candidate in r.memoryCandidates) {
-        await memory.addMemory(candidate);
-      }
-    }
-
     setState(() {
       typing = false;
       expression = r.expression;
@@ -64,6 +58,18 @@ class _ChatScreenState extends State<ChatScreen> {
       if (r.categories.isNotEmpty) latestCategories = r.categories;
       messages.add(ChatMessage(text: r.text, fromUser: false));
     });
+    unawaited(_remember(r.memoryCandidates));
+  }
+
+  Future<void> _remember(List<String> candidates) async {
+    if (candidates.isEmpty) return;
+    try {
+      final profile = await memory.load();
+      if (!profile.memoryEnabled) return;
+      for (final candidate in candidates) {
+        await memory.addMemory(candidate);
+      }
+    } catch (_) { /* Reply is already displayed; local data stays available. */ }
   }
 
   Future<void> toggleVoice() async {
