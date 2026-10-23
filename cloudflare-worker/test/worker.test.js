@@ -27,7 +27,13 @@ test('signed Firebase token is required, including for guests', async () => {
   assert.equal((await worker.fetch(chat(undefined,'invalid'),env)).status,401);
   const valid = await token();
   assert.equal((await verifyFirebaseToken(valid,project)).sub,'guest-1');
-  assert.equal((await worker.fetch(chat(undefined,valid),env)).status,200);
+  const response = await worker.fetch(chat(undefined,valid),env);
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('server-timing'), /auth;dur=/);
+  assert.match(response.headers.get('server-timing'), /gemini;dur=/);
+  assert.match(response.headers.get('server-timing'), /total;dur=/);
+  assert.ok(response.headers.get('x-request-id'));
+  assert.equal(response.headers.get('server-timing').includes('test-secret'),false);
 });
 test('wrong audience, expired and tampered tokens fail', async () => {
   await assert.rejects(verifyFirebaseToken(await token({aud:'other'}),project));
