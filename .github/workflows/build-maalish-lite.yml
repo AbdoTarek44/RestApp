@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'lite_build/**'
+      - 'lite_app/**'
       - '.github/workflows/build-maalish-lite.yml'
 
 permissions:
@@ -29,15 +29,8 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Restore Maalish Lite source
-        run: |
-          cat lite_build/lite_src_00.b64 lite_build/lite_src_01.b64 | base64 -d > /tmp/maalish_lite.zip
-          unzip -q /tmp/maalish_lite.zip -d .
-          test -f maalish_lite/pubspec.yaml
-          test -f maalish_lite/lib/main.dart
-
       - name: Generate Android project
-        working-directory: maalish_lite
+        working-directory: lite_app
         run: |
           flutter create --platforms=android --org com.maalish.app --project-name maalish_lite .
           python3 - <<'PY'
@@ -51,15 +44,15 @@ jobs:
           PY
 
       - name: Get dependencies
-        working-directory: maalish_lite
+        working-directory: lite_app
         run: flutter pub get
 
       - name: Build release APK
-        working-directory: maalish_lite
+        working-directory: lite_app
         run: flutter build apk --release
 
       - name: Prepare APK
-        run: cp maalish_lite/build/app/outputs/flutter-apk/app-release.apk Maalish-Lite.apk
+        run: cp lite_app/build/app/outputs/flutter-apk/app-release.apk Maalish-Lite.apk
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
@@ -74,5 +67,5 @@ jobs:
           gh release delete maalish-lite-latest --yes --cleanup-tag || true
           gh release create maalish-lite-latest Maalish-Lite.apk \
             --title 'Maalish Lite - Latest Beta' \
-            --notes 'Offline beta: vent by text or voice, get random funny Maalish replies, and share Maalish cards.' \
+            --notes 'Offline beta: text/voice venting, random funny Maalish replies, anti-repeat logic, surprise replies, and shareable Maalish cards.' \
             --latest
