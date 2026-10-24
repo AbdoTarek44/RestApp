@@ -1,0 +1,78 @@
+name: Build Maalish Lite
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'lite_build/**'
+      - '.github/workflows/build-maalish-lite.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restore Maalish Lite source
+        run: |
+          cat lite_build/lite_src_00.b64 lite_build/lite_src_01.b64 | base64 -d > /tmp/maalish_lite.zip
+          unzip -q /tmp/maalish_lite.zip -d .
+          test -f maalish_lite/pubspec.yaml
+          test -f maalish_lite/lib/main.dart
+
+      - name: Generate Android project
+        working-directory: maalish_lite
+        run: |
+          flutter create --platforms=android --org com.maalish.app --project-name maalish_lite .
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          if 'android.permission.RECORD_AUDIO' not in s:
+              s = s.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">', '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>')
+          s = s.replace('android:label="maalish_lite"', 'android:label="معلش"')
+          p.write_text(s)
+          PY
+
+      - name: Get dependencies
+        working-directory: maalish_lite
+        run: flutter pub get
+
+      - name: Build release APK
+        working-directory: maalish_lite
+        run: flutter build apk --release
+
+      - name: Prepare APK
+        run: cp maalish_lite/build/app/outputs/flutter-apk/app-release.apk Maalish-Lite.apk
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Maalish-Lite-APK
+          path: Maalish-Lite.apk
+
+      - name: Publish latest beta release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete maalish-lite-latest --yes --cleanup-tag || true
+          gh release create maalish-lite-latest Maalish-Lite.apk \
+            --title 'Maalish Lite - Latest Beta' \
+            --notes 'Offline beta: vent by text or voice, get random funny Maalish replies, and share Maalish cards.' \
+            --latest
